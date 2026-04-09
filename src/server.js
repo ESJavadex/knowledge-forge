@@ -105,7 +105,15 @@ export async function startServer() {
   });
 
   app.listen(PORT, () => {
-    console.log(`\n📚 LLM Wiki running at http://localhost:${PORT}`);
+    console.log(`\n📚 Knowledge Forge running at http://localhost:${PORT}`);
     console.log(`   ${new Date().toLocaleString()}\n`);
+  });
+}
+
+// Auto-start when run directly (not imported)
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+  startServer().catch(err => {
+    console.error('Failed to start server:', err);
+    process.exit(1);
   });
 }

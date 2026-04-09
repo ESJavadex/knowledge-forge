@@ -1,8 +1,10 @@
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import matter from 'gray-matter';
 
-export const ROOT = process.cwd();
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+export const ROOT = path.resolve(__dirname, '..');
 export const RAW_DIR = path.join(ROOT, 'raw');
 export const WIKI_DIR = path.join(ROOT, 'wiki');
 export const SOURCE_DIR = path.join(WIKI_DIR, 'sources');
@@ -47,9 +49,16 @@ export function readMarkdownWithFrontmatter(filePath) {
 
 export function listMarkdownFiles(dir) {
   if (!fs.existsSync(dir)) return [];
-  return fs.readdirSync(dir)
-    .filter((file) => file.endsWith('.md'))
-    .map((file) => path.join(dir, file));
+  const results = [];
+  function walk(d) {
+    for (const entry of fs.readdirSync(d, { withFileTypes: true })) {
+      const full = path.join(d, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (entry.name.endsWith('.md')) results.push(full);
+    }
+  }
+  walk(dir);
+  return results;
 }
 
 export function wikiLink(name) {
