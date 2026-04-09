@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LLM Wiki</title>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --border: #2a2d3a;
+      --text: #e0e0e6;
+      --text-muted: #8888a0;
+      --accent: #6c8cff;
+      --accent-dim: #4a5fcc;
+      --concept: #6cffe0;
+      --entity: #ff6c8c;
+      --source: #ffc86c;
+      --analysis: #c86cff;
+      --radius: 8px;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+    }
+
+    .app {
+      display: flex;
+      height: 100vh;
+    }
+
+    /* Sidebar */
+    .sidebar {
+      width: 300px;
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .sidebar-header {
+      padding: 16px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .sidebar-header h1 {
+      font-size: 18px;
+      font-weight: 600;
+    }
+
+    .sidebar-header h1 span { color: var(--accent); }
+
+    .stats {
+      display: flex;
+      gap: 12px;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .stat { display: flex; align-items: center; gap: 4px; }
+    .stat-dot { width: 8px; height: 8px; border-radius: 50%; }
+
+    .search-box {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .search-box input {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 8px 12px;
+      color: var(--text);
+      font-size: 13px;
+      outline: none;
+    }
+
+    .search-box input:focus { border-color: var(--accent); }
+
+    .filter-tabs {
+      display: flex;
+      padding: 8px 16px;
+      gap: 4px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .filter-tab {
+      padding: 4px 10px;
+      border-radius: 12px;
+      font-size: 11px;
+      cursor: pointer;
+      background: transparent;
+      color: var(--text-muted);
+      border: 1px solid transparent;
+      transition: all 0.15s;
+    }
+
+    .filter-tab:hover { color: var(--text); }
+    .filter-tab.active { background: var(--border); color: var(--text); }
+
+    .page-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 8px;
+    }
+
+    .page-item {
+      padding: 10px 12px;
+      border-radius: var(--radius);
+      cursor: pointer;
+      transition: background 0.15s;
+      margin-bottom: 2px;
+    }
+
+    .page-item:hover { background: var(--border); }
+    .page-item.active { background: var(--accent-dim); }
+
+    .page-item-title {
+      font-size: 13px;
+      font-weight: 500;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .page-item-type {
+      font-size: 10px;
+      padding: 1px 6px;
+      border-radius: 8px;
+      text-transform: uppercase;
+      font-weight: 600;
+    }
+
+    .type-source { background: rgba(255,200,108,0.15); color: var(--source); }
+    .type-concept { background: rgba(108,255,224,0.15); color: var(--concept); }
+    .type-entity { background: rgba(255,108,140,0.15); color: var(--entity); }
+    .type-analysis { background: rgba(200,108,255,0.15); color: var(--analysis); }
+
+    .page-item-preview {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 4px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    /* Main content */
+    .main {
+      flex: 1;
+      overflow-y: auto;
+    }
+
+    .main-content {
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 40px 48px;
+    }
+
+    .welcome {
+      text-align: center;
+      padding: 80px 40px;
+      color: var(--text-muted);
+    }
+
+    .welcome h2 {
+      font-size: 28px;
+      color: var(--text);
+      margin-bottom: 12px;
+    }
+
+    .welcome p { max-width: 500px; margin: 0 auto 20px; }
+
+    .page-header {
+      margin-bottom: 32px;
+      padding-bottom: 20px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .page-header h1 { font-size: 28px; margin-bottom: 8px; }
+
+    .page-meta {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .page-body h1 { font-size: 22px; margin: 24px 0 12px; }
+    .page-body h2 { font-size: 18px; margin: 20px 0 10px; color: var(--accent); }
+    .page-body h3 { font-size: 15px; margin: 16px 0 8px; }
+    .page-body p { margin-bottom: 12px; }
+    .page-body ul, .page-body ol { margin: 8px 0 12px 24px; }
+    .page-body li { margin-bottom: 4px; }
+    .page-body blockquote {
+      border-left: 3px solid var(--accent);
+      padding: 8px 16px;
+      margin: 12px 0;
+      color: var(--text-muted);
+      background: rgba(108,140,255,0.05);
+      border-radius: 0 var(--radius) var(--radius) 0;
+    }
+    .page-body code {
+      background: var(--border);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 13px;
+    }
+    .page-body hr { border: none; border-top: 1px solid var(--border); margin: 20px 0; }
+
+    /* Wiki links */
+    .wikilink {
+      color: var(--accent);
+      text-decoration: none;
+      border-bottom: 1px dashed var(--accent-dim);
+      cursor: pointer;
+    }
+    .wikilink:hover { color: #8ca8ff; }
+
+    .dangling {
+      color: var(--entity);
+      opacity: 0.7;
+      cursor: default;
+    }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+      .sidebar { width: 240px; }
+      .main-content { padding: 24px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <h1>📚 LLM <span>Wiki</span></h1>
+      </div>
+      <div class="stats" id="stats"></div>
+      <div class="search-box">
+        <input type="text" id="search" placeholder="Search pages..." />
+      </div>
+      <div class="filter-tabs" id="filters">
+        <div class="filter-tab active" data-filter="all">All</div>
+        <div class="filter-tab" data-filter="source">Sources</div>
+        <div class="filter-tab" data-filter="concept">Concepts</div>
+        <div class="filter-tab" data-filter="entity">Entities</div>
+        <div class="filter-tab" data-filter="analysis">Analyses</div>
+      </div>
+      <div class="page-list" id="page-list"></div>
+    </aside>
+    <main class="main" id="main"></main>
+  </div>
+
+  <script>
+    const API = '/api';
+    let allPages = [];
+    let currentFilter = 'all';
+    let currentSlug = null;
+
+    async function loadPages() {
+      const res = await fetch(`${API}/pages`);
+      allPages = await res.json();
+      renderStats();
+      renderList();
+    }
+
+    async function loadStats() {
+      const res = await fetch(`${API}/stats`);
+      return res.json();
+    }
+
+    async function loadPage(slug) {
+      currentSlug = slug;
+      const res = await fetch(`${API}/pages/${encodeURIComponent(slug)}`);
+      if (!res.ok) {
+        document.getElementById('main').innerHTML = `
+          <div class="welcome">
+            <h2>Page not found</h2>
+            <p>The page "${slug}" doesn't exist yet.</p>
+          </div>`;
+        return;
+      }
+      const page = await res.json();
+      renderPage(page);
+      highlightActive(slug);
+    }
+
+    function renderStats() {
+      loadStats().then(stats => {
+        const colors = { source: '#ffc86c', concept: '#6cffe0', entity: '#ff6c8c', analysis: '#c86cff' };
+        const labels = { source: 'Sources', concept: 'Concepts', entity: 'Entities', analysis: 'Analyses' };
+        let html = `<span class="stat"><span class="stat-dot" style="background:var(--text-muted)"></span>${stats.total} pages</span>`;
+        for (const [type, count] of Object.entries(stats.types)) {
+          html += `<span class="stat"><span class="stat-dot" style="background:${colors[type] || '#888'}"></span>${count} ${labels[type] || type}</span>`;
+        }
+        document.getElementById('stats').innerHTML = html;
+      });
+    }
+
+    function renderList() {
+      const query = document.getElementById('search').value.toLowerCase();
+      const filtered = allPages.filter(p => {
+        const matchType = currentFilter === 'all' || p.type === currentFilter;
+        const matchSearch = !query || p.title.toLowerCase().includes(query) || (p.preview || '').toLowerCase().includes(query);
+        return matchType && matchSearch;
+      });
+
+      document.getElementById('page-list').innerHTML = filtered.map(p => `
+        <div class="page-item ${p.slug === currentSlug ? 'active' : ''}" data-slug="${p.slug}">
+          <div class="page-item-title">
+            <span class="page-item-type type-${p.type}">${p.type}</span>
+            ${p.title}
+          </div>
+          ${p.preview ? `<div class="page-item-preview">${p.preview}</div>` : ''}
+        </div>
+      `).join('');
+
+      // Bind clicks
+      document.querySelectorAll('.page-item').forEach(el => {
+        el.addEventListener('click', () => loadPage(el.dataset.slug));
+      });
+    }
+
+    function highlightActive(slug) {
+      document.querySelectorAll('.page-item').forEach(el => {
+        el.classList.toggle('active', el.dataset.slug === slug);
+      });
+    }
+
+    function renderPage(page) {
+      document.getElementById('main').innerHTML = `
+        <div class="main-content">
+          <div class="page-header">
+            <h1>${page.title}</h1>
+            <div class="page-meta">
+              <span class="page-item-type type-${page.type}">${page.type}</span>
+              ${page.frontmatter.created ? `<span>Created: ${new Date(page.frontmatter.created).toLocaleDateString()}</span>` : ''}
+              ${page.frontmatter.ingested ? `<span>Ingested: ${new Date(page.frontmatter.ingested).toLocaleDateString()}</span>` : ''}
+              ${page.frontmatter.mention_count ? `<span>${page.frontmatter.mention_count} mentions</span>` : ''}
+            </div>
+          </div>
+          <div class="page-body">${page.html}</div>
+        </div>`;
+
+      // Make wiki links navigate within the SPA
+      document.querySelectorAll('.wikilink').forEach(link => {
+        link.addEventListener('click', (e) => {
+          e.preventDefault();
+          const href = link.getAttribute('href');
+          if (href && href.startsWith('/page/')) {
+            const slug = decodeURIComponent(href.replace('/page/', ''));
+            loadPage(slug);
+          }
+        });
+      });
+    }
+
+    function renderWelcome() {
+      document.getElementById('main').innerHTML = `
+        <div class="welcome">
+          <h2>📚 LLM Wiki</h2>
+          <p>A persistent, compounding knowledge base maintained by LLMs. Select a page from the sidebar to explore.</p>
+          <p style="font-size:13px;opacity:0.6">Based on the LLM Wiki pattern by <a href="https://github.com/karpathy" style="color:var(--accent)" target="_blank">Karpathy</a></p>
+        </div>`;
+    }
+
+    // Event listeners
+    document.getElementById('search').addEventListener('input', renderList);
+
+    document.getElementById('filters').addEventListener('click', (e) => {
+      const tab = e.target.closest('.filter-tab');
+      if (!tab) return;
+      currentFilter = tab.dataset.filter;
+      document.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      renderList();
+    });
+
+    // Init
+    loadPages();
+    renderWelcome();
+  </script>
+</body>
+</html>

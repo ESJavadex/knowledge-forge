@@ -1,0 +1,19 @@
+{
+  "name": "llm-wiki",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node src/cli.js init && node src/cli.js demo && node src/server.js",
+    "start": "node src/server.js",
+    "init": "node src/cli.js init",
+    "demo": "node src/cli.js demo",
+    "ingest": "node src/cli.js ingest",
+    "lint": "node src/cli.js lint"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "gray-matter": "^4.0.3",
+    "marked": "^15.0.7"
+  }
+}
