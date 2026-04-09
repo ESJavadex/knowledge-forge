@@ -49,6 +49,48 @@ Knowledge Forge takes raw documents and turns them into a living, interconnected
 - 🌐 **Serves** a dark-themed web UI to browse and explore
 - 📝 **Logs** every operation chronologically
 
+## Current Status
+
+**This repo is intentionally positioned as a functional concept implementation.**
+
+That means it already proves the end-to-end pattern:
+- raw sources → wiki pages
+- cross-linking between pages
+- persistent markdown artifact
+- index + log
+- browseable UI
+- health checks / linting
+
+But it does **not** yet implement the full autonomous LLM maintainer vision described by Karpathy.
+
+### What is already real
+
+- A working ingestion pipeline
+- Persistent wiki generation on disk
+- Concept and entity page creation
+- Incremental wiki updates from new sources
+- A usable local web UI
+- A concrete repo anyone can clone, run, and extend
+
+### What is still missing
+
+- **LLM-powered semantic extraction**
+  - Right now extraction is heuristic (word frequency + bigrams), not model-based
+- **Natural-language querying**
+  - You can browse the wiki, but not yet ask questions like "compare X vs Y" and have answers filed back automatically
+- **Contradiction handling**
+  - The current version does not yet detect or annotate conflicts between sources
+- **Human-in-the-loop workflows**
+  - No review queue, approval flow, or source triage loop yet
+- **Richer search / retrieval**
+  - No BM25/vector search yet, only file-based navigation and simple UI filtering
+- **Autonomous maintenance loop**
+  - No background agent that continuously ingests, revises, and improves the wiki over time
+
+So the right framing is:
+
+> **Knowledge Forge is a functional prototype of the LLM Wiki pattern, with the core architecture working today and the full LLM-native maintainer loop left as the next step.**
+
 ## Why Not Just RAG?
 
 | | RAG | Knowledge Forge |
@@ -194,6 +236,8 @@ Run `npm run demo` to generate all of them.
 - [ ] **Dataview queries** — YAML frontmatter + Dataview plugin integration
 - [ ] **Contradiction detection** — Flag when new sources contradict existing wiki claims
 - [ ] **Web clipper helper** — Easy ingestion from browser extensions
+- [ ] **Continuous maintainer mode** — Background agent loop for ingest, refinement, and linting
+- [ ] **Review workflows** — Human approval mode for team/internal knowledge bases
 
 ## Author
 
