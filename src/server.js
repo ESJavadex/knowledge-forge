@@ -7,6 +7,7 @@ import { listMarkdownFiles, WIKI_DIR } from './utils.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3000;
+const HOST = process.env.HOST || '0.0.0.0';
 
 function getAllPages() {
   const files = listMarkdownFiles(WIKI_DIR);
@@ -104,8 +105,10 @@ export async function startServer() {
     res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
   });
 
-  app.listen(PORT, () => {
-    console.log(`\n📚 Knowledge Forge running at http://localhost:${PORT}`);
+  app.listen(PORT, HOST, () => {
+    console.log(`\n📚 Knowledge Forge running at http://${HOST}:${PORT}`);
+    console.log(`   Local:   http://localhost:${PORT}`);
+    console.log(`   Network: http://${HOST}:${PORT}`);
     console.log(`   ${new Date().toLocaleString()}\n`);
   });
 }

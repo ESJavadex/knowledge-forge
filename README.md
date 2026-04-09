@@ -16,6 +16,21 @@
   <a href="#quick-start">Quick Start</a> · <a href="#how-it-works">How It Works</a> · <a href="#commands">Commands</a> · <a href="#architecture">Architecture</a> · <a href="#roadmap">Roadmap</a>
 </p>
 
+<p align="center">
+  <img src="docs/home.png" alt="Knowledge Forge Web UI - Home" width="700" /><br/>
+  <em>Dark-themed web UI with sidebar, type filters, search, and wiki link navigation</em>
+</p>
+
+<p align="center">
+  <img src="docs/source-page.png" alt="Source page with wiki links" width="700" /><br/>
+  <em>Source pages auto-extract concepts and entities with clickable wiki links</em>
+</p>
+
+<p align="center">
+  <img src="docs/concept-page.png" alt="Concept page" width="700" /><br/>
+  <em>Concept pages accumulate cross-references from multiple sources</em>
+</p>
+
 ---
 
 > **Inspired by [Andrej Karpathy's LLM Wiki pattern](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f).**
