@@ -9,7 +9,8 @@
     "init": "node src/cli.js init",
     "demo": "node src/cli.js demo",
     "ingest": "node src/cli.js ingest",
-    "lint": "node src/cli.js lint"
+    "lint": "node src/cli.js lint",
+    "test": "node --test"
   },
   "dependencies": {
     "express": "^4.21.2",

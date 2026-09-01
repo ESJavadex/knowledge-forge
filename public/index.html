@@ -87,6 +87,38 @@
 
     .search-box input:focus { border-color: var(--accent); }
 
+    .query-box {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      gap: 6px;
+    }
+
+    .query-box input {
+      min-width: 0;
+      flex: 1;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 8px 10px;
+      color: var(--text);
+      font-size: 13px;
+      outline: none;
+    }
+
+    .query-box input:focus { border-color: var(--accent); }
+
+    .query-box button {
+      border: 0;
+      border-radius: var(--radius);
+      padding: 8px 10px;
+      background: var(--accent);
+      color: white;
+      cursor: pointer;
+    }
+
+    .query-box button:disabled { opacity: 0.55; cursor: wait; }
+
     .filter-tabs {
       display: flex;
       padding: 8px 16px;
@@ -257,6 +289,10 @@
       <div class="search-box">
         <input type="text" id="search" placeholder="Search pages..." />
       </div>
+      <form class="query-box" id="query-form">
+        <input type="text" id="query" placeholder="Ask the wiki..." aria-label="Ask the wiki" />
+        <button type="submit" id="query-button">Ask</button>
+      </form>
       <div class="filter-tabs" id="filters">
         <div class="filter-tab active" data-filter="all">All</div>
         <div class="filter-tab" data-filter="source">Sources</div>
@@ -384,6 +420,38 @@
 
     // Event listeners
     document.getElementById('search').addEventListener('input', renderList);
+
+    document.getElementById('query-form').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const input = document.getElementById('query');
+      const button = document.getElementById('query-button');
+      const question = input.value.trim();
+      if (!question || button.disabled) return;
+
+      button.disabled = true;
+      button.textContent = '...';
+      document.getElementById('main').innerHTML = `
+        <div class="welcome"><h2>Consulting the wiki…</h2><p>Only cited wiki knowledge will be used.</p></div>`;
+
+      try {
+        const response = await fetch(`${API}/query`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ question }),
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || 'The query failed.');
+        await loadPages();
+        await loadPage(result.analysisSlug);
+      } catch (error) {
+        document.getElementById('main').innerHTML = `
+          <div class="welcome"><h2>Query unavailable</h2><p id="query-error"></p></div>`;
+        document.getElementById('query-error').textContent = error.message;
+      } finally {
+        button.disabled = false;
+        button.textContent = 'Ask';
+      }
+    });
 
     document.getElementById('filters').addEventListener('click', (e) => {
       const tab = e.target.closest('.filter-tab');

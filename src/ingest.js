@@ -1,85 +1,28 @@
-import { readText, slugify, titleCase, wikiLink, nowIso, ensureDir, writeText, listMarkdownFiles, extractWikiLinks, WIKI_DIR, SOURCE_DIR, CONCEPT_DIR, ENTITY_DIR, RAW_DIR } from './utils.js';
-
-/**
- * Analyze a text and extract candidate concepts/entities.
- * Uses simple frequency heuristics + common stop-words.
- */
-const STOP_WORDS = new Set([
-  'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
-  'of', 'with', 'by', 'from', 'is', 'it', 'this', 'that', 'as', 'are',
-  'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had', 'do', 'does',
-  'did', 'will', 'would', 'could', 'should', 'may', 'might', 'can', 'shall',
-  'not', 'no', 'nor', 'so', 'if', 'then', 'than', 'too', 'very', 'just',
-  'about', 'above', 'after', 'again', 'all', 'also', 'am', 'any', 'because',
-  'before', 'between', 'both', 'each', 'few', 'further', 'get', 'got', 'he',
-  'her', 'here', 'him', 'his', 'how', 'i', 'into', 'its', 'let', 'like',
-  'make', 'me', 'more', 'most', 'much', 'must', 'my', 'new', 'now', 'old',
-  'only', 'other', 'our', 'out', 'own', 'per', 'put', 'same', 'she', 'some',
-  'still', 'such', 'take', 'their', 'them', 'there', 'these', 'they', 'those',
-  'through', 'time', 'under', 'up', 'us', 'use', 'used', 'using', 'via',
-  'want', 'we', 'well', 'what', 'when', 'where', 'which', 'while', 'who',
-  'why', 'you', 'your', 'one', 'two', 'way', 'many', 'even', 'back',
-  'over', 'work', 'first', 'down', 'since', 'off', 'come', 'around',
-  'long', 'every', 'year', 'good', 'give', 'most', 'day', 'look',
-]);
-
-const MIN_LEN = 3;
-const MAX_EXTRACTS = 30;
-
-function extractCandidates(text) {
-  const words = text.toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/);
-  const freq = {};
-
-  for (const w of words) {
-    if (w.length >= MIN_LEN && !STOP_WORDS.has(w)) {
-      freq[w] = (freq[w] || 0) + 1;
-    }
-  }
-
-  // Bigrams
-  for (let i = 0; i < words.length - 1; i++) {
-    const a = words[i], b = words[i + 1];
-    if (!STOP_WORDS.has(a) && !STOP_WORDS.has(b) && a.length >= MIN_LEN && b.length >= MIN_LEN) {
-      const bigram = `${a} ${b}`;
-      freq[bigram] = (freq[bigram] || 0) + 2; // slight boost
-    }
-  }
-
-  return Object.entries(freq)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, MAX_EXTRACTS)
-    .map(([word, count]) => ({ word, count }));
-}
-
-function classifyCandidate(word) {
-  // Simple heuristic: longer phrases and capitalized terms tend to be entities
-  const lower = word.toLowerCase();
-  const entityIndicators = ['http', 'api', 'llm', 'rag', 'wiki', 'mcp', 'ai', 'gpt', 'claude', 'gemini', 'obsidian'];
-  const isEntity = word.includes(' ') || entityIndicators.some(e => lower.includes(e));
-  return isEntity ? 'entity' : 'concept';
-}
+import fs from 'fs';
+import path from 'path';
+import { slugify, titleCase, wikiLink, nowIso, ensureDir, writeText, listMarkdownFiles, WIKI_DIR, SOURCE_DIR, CONCEPT_DIR, ENTITY_DIR } from './utils.js';
+import { readSourceDocument } from './adapters/source-reader.js';
+import { extractSemantics } from './extraction.js';
+import { createOpenRouterGenerator } from './adapters/openrouter.js';
 
 /**
  * Ingest a raw source file into the wiki.
  */
-export function ingestSource(filePath) {
+export async function ingestSource(filePath, {
+  generator = createOpenRouterGenerator(),
+  sourceReader = readSourceDocument,
+  logger = console,
+} = {}) {
   const fileName = path.basename(filePath);
-  const text = readText(filePath);
+  const text = sourceReader(filePath);
 
   // 1. Create source summary
-  const slug = slugify(fileName.replace(/\.md$/, ''));
+  const slug = slugify(fileName.slice(0, -path.extname(fileName).length) || fileName);
   const sourceTitle = titleCase(slug.replace(/-/g, ' '));
   const sourcePath = path.join(SOURCE_DIR, `${slug}.md`);
 
-  const candidates = extractCandidates(text);
-
-  // Separate into concepts and entities
-  const concepts = candidates.filter(c => classifyCandidate(c.word) === 'concept');
-  const entities = candidates.filter(c => classifyCandidate(c.word) === 'entity');
-
-  // Extract first paragraph as summary
-  const paragraphs = text.split(/\n\s*\n/).filter(p => p.trim().length > 20);
-  const summary = paragraphs[0]?.replace(/^#+\s/gm, '').slice(0, 500) || 'No summary available.';
+  const extraction = await extractSemantics({ text, fileName, generator, logger });
+  const { concepts, entities, summary } = extraction;
 
   let sourceContent = `---
 type: source
@@ -103,14 +46,14 @@ ${summary}
 `;
 
   for (const c of concepts.slice(0, 15)) {
-    const title = titleCase(c.word);
+    const title = titleCase(c.name);
     sourceContent += `- ${wikiLink(title)} (${c.count} mentions)\n`;
   }
 
   sourceContent += `\n## Key Entities\n\n`;
 
   for (const e of entities.slice(0, 15)) {
-    const title = titleCase(e.word);
+    const title = titleCase(e.name);
     sourceContent += `- ${wikiLink(title)} (${e.count} mentions)\n`;
   }
 
@@ -122,16 +65,16 @@ ${summary}
   // 2. Update concept pages
   const touchedPages = [sourcePath];
   for (const c of concepts.slice(0, 10)) {
-    const title = titleCase(c.word);
-    const cSlug = slugify(c.word);
+    const title = titleCase(c.name);
+    const cSlug = slugify(c.name);
     const cPath = path.join(CONCEPT_DIR, `${cSlug}.md`);
     touchedPages.push(updateOrCreatePage(cPath, title, 'concept', sourceTitle, c.count, summary.slice(0, 200)));
   }
 
   // 3. Update entity pages
   for (const e of entities.slice(0, 10)) {
-    const title = titleCase(e.word);
-    const eSlug = slugify(e.word);
+    const title = titleCase(e.name);
+    const eSlug = slugify(e.name);
     const ePath = path.join(ENTITY_DIR, `${eSlug}.md`);
     touchedPages.push(updateOrCreatePage(ePath, title, 'entity', sourceTitle, e.count, summary.slice(0, 200)));
   }
@@ -142,7 +85,14 @@ ${summary}
   // 5. Append to log
   appendLog('ingest', sourceTitle, fileName);
 
-  return { sourceTitle, concepts: concepts.length, entities: entities.length, touchedPages };
+  return {
+    sourceTitle,
+    concepts: concepts.length,
+    entities: entities.length,
+    relevantDates: extraction.relevantDates,
+    extractionMode: extraction.mode,
+    touchedPages,
+  };
 }
 
 function updateOrCreatePage(pagePath, title, type, sourceTitle, mentions, excerpt) {
@@ -243,6 +193,3 @@ export function appendLog(action, title, detail) {
 
   console.log('  📝 Log entry appended');
 }
-
-import path from 'path';
-import fs from 'fs';

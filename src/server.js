@@ -4,6 +4,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import matter from 'gray-matter';
 import { listMarkdownFiles, WIKI_DIR } from './utils.js';
+import { queryWiki } from './query.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3000;
@@ -54,7 +55,25 @@ export async function startServer() {
   const { default: express } = await import('express');
   const app = express();
 
+  app.use(express.json({ limit: '32kb' }));
   app.use(express.static(path.join(__dirname, '..', 'public')));
+
+  app.post('/api/query', async (req, res) => {
+    const question = typeof req.body?.question === 'string' ? req.body.question.trim() : '';
+    if (!question) return res.status(400).json({ error: 'A non-empty question is required.' });
+
+    try {
+      const result = await queryWiki(question);
+      res.json({
+        found: result.found,
+        answer: result.answerMarkdown,
+        analysisSlug: result.analysisSlug,
+      });
+    } catch (error) {
+      const status = error.message.includes('OPENROUTER_API_KEY') ? 503 : 500;
+      res.status(status).json({ error: error.message });
+    }
+  });
 
   app.get('/api/pages', (_req, res) => {
     const pages = getAllPages();

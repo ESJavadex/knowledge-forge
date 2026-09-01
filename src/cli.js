@@ -7,6 +7,7 @@ import { ensureDir, writeText, RAW_DIR, WIKI_DIR, SOURCE_DIR, CONCEPT_DIR, ENTIT
 import { ingestSource, updateIndex, appendLog } from './ingest.js';
 import { lintWiki } from './lint.js';
 import { startServer } from './server.js';
+import { queryWiki } from './query.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -33,7 +34,7 @@ function init() {
   console.log('\n✅ Wiki structure ready.\n');
 }
 
-function demo() {
+async function demo() {
   console.log('🎯 Creating demo sources and ingesting...\n');
 
   // Sample source 1
@@ -116,7 +117,7 @@ An LLM Wiki can be seen as a text-based knowledge graph. Wiki pages are entities
   const sources = listMarkdownFiles(RAW_DIR);
   for (const src of sources) {
     console.log(`\n📥 Ingesting: ${path.basename(src)}`);
-    ingestSource(src);
+    await ingestSource(src);
   }
 
   console.log('\n✅ Demo complete. Run `npm run lint` to check wiki health.\n');
@@ -130,7 +131,7 @@ switch (command) {
 
   case 'demo':
     init();
-    demo();
+    await demo();
     break;
 
   case 'ingest': {
@@ -141,8 +142,21 @@ switch (command) {
       process.exit(1);
     }
     console.log(`\n📥 Ingesting: ${file}`);
-    ingestSource(path.resolve(file));
+    const result = await ingestSource(path.resolve(file));
+    console.log(`  Extraction: ${result.extractionMode}`);
     console.log();
+    break;
+  }
+
+  case 'query': {
+    const question = args.slice(1).join(' ').trim();
+    if (!question) {
+      console.error('Usage: node src/cli.js query "<question>"');
+      process.exit(1);
+    }
+    const result = await queryWiki(question);
+    console.log(`\n${result.answerMarkdown}\n`);
+    console.log(`  📄 Saved: ${path.relative(process.cwd(), result.analysisPath)}`);
     break;
   }
 
@@ -163,6 +177,7 @@ Usage:
   node src/cli.js init        Bootstrap wiki structure
   node src/cli.js demo        Create sample sources and ingest them
   node src/cli.js ingest FILE Ingest a markdown source file
+  node src/cli.js query TEXT  Answer from the wiki with raw-source citations
   node src/cli.js lint        Health-check the wiki
   node src/cli.js serve       Start the web UI (localhost:3000)
 `);

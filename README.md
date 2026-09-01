@@ -42,11 +42,12 @@
 
 Knowledge Forge takes raw documents and turns them into a living, interconnected wiki. Not a one-shot RAG pipeline — a **compounding knowledge base** that gets richer with every source you feed it.
 
-- 📥 **Ingest** markdown/text sources → auto-extracts concepts and entities
+- 📥 **Ingest** markdown/text/PDF sources → semantically extracts summaries, concepts, entities, and dates with OpenRouter
 - 🔗 **Links** related pages together with wiki-style `[[links]]`
 - 📋 **Indexes** everything into a navigable catalog
 - 🔍 **Lints** the wiki: finds orphans, dangling links, missing metadata
 - 🌐 **Serves** a dark-themed web UI to browse and explore
+- 💬 **Queries** the compiled wiki in natural language with mandatory wiki + raw-source citations
 - 📝 **Logs** every operation chronologically
 
 ## Current Status
@@ -74,10 +75,6 @@ But it does **not** yet implement the full autonomous LLM maintainer vision desc
 
 ### What is still missing
 
-- **LLM-powered semantic extraction**
-  - Right now extraction is heuristic (word frequency + bigrams), not model-based
-- **Natural-language querying**
-  - You can browse the wiki, but not yet ask questions like "compare X vs Y" and have answers filed back automatically
 - **Contradiction handling**
   - The current version does not yet detect or annotate conflicts between sources
 - **Human-in-the-loop workflows**
@@ -118,7 +115,8 @@ Open `http://localhost:3000` and browse the wiki. The sidebar lets you filter by
 ```bash
 node src/cli.js init              # Create folder structure + special files
 node src/cli.js demo              # Create 3 sample sources and ingest them
-node src/cli.js ingest <file.md>  # Ingest a markdown source into the wiki
+node src/cli.js ingest <file>     # Ingest a markdown, text, or PDF source
+node src/cli.js query "<question>" # Answer from wiki knowledge and save the cited analysis
 node src/cli.js lint              # Health-check: orphans, dangling links, metadata
 node src/cli.js serve             # Start the web UI (port 3000)
 ```
@@ -133,14 +131,29 @@ npm run lint
 npm start
 ```
 
+### OpenRouter configuration
+
+Semantic extraction and natural-language queries use OpenRouter. Any OpenRouter model can be selected; Anthropic models are supported through the same adapter.
+
+```bash
+export OPENROUTER_API_KEY="..."
+export OPENROUTER_MODEL="anthropic/claude-3.5-haiku" # optional
+```
+
+`LLM_MODEL` is also accepted as a model override. Without `OPENROUTER_API_KEY`, ingestion automatically uses the original frequency/bigram heuristic, so `init`, `demo`, `ingest`, `lint`, and `serve` keep working offline. Query mode reports that OpenRouter configuration is required.
+
+When OpenRouter is enabled, source excerpts are sent to the selected model provider. Check that provider's privacy terms before ingesting sensitive personal documents.
+
+PDF ingestion uses the system `pdftotext` command (Poppler) and never modifies the file in `raw/`.
+
 ## How It Works
 
 ### 1. Ingest
 
-Drop a `.md` file into `raw/` and run `ingest`. The engine:
+Drop a `.md`, `.txt`, or `.pdf` file into `raw/` and run `ingest`. The engine:
 
-1. Reads the source and extracts a summary
-2. Identifies **concepts** (recurring themes) and **entities** (named things, tools, products) using frequency analysis + bigram detection
+1. Reads the immutable source and extracts a grounded summary plus relevant dates
+2. Identifies **concepts** (recurring themes) and **entities** (named people, medications, tools, products, and organizations) with the configured OpenRouter model
 3. Creates a source summary page in `wiki/sources/`
 4. Creates or updates concept pages in `wiki/concepts/`
 5. Creates or updates entity pages in `wiki/entities/`
@@ -149,9 +162,11 @@ Drop a `.md` file into `raw/` and run `ingest`. The engine:
 
 A single source can touch 20+ wiki pages.
 
-### 2. Query (Browse)
+If OpenRouter is not configured or returns malformed structured output, ingestion falls back defensively to the original heuristic extractor.
 
-Open the web UI and explore. Wiki links are clickable and navigate between related pages. Every page shows its type, creation date, mention count, and linked sources.
+### 2. Query
+
+Use `node src/cli.js query "..."` or the query field in the web UI. Retrieval is a simple file/text scan over `wiki/` (no vector index or BM25). The model may emit only atomic claims backed by an exact wiki-page/raw-source pair; unsupported claims are discarded. Every result is saved under `wiki/analyses/`, linked to its supporting pages, indexed, and logged.
 
 ### 3. Lint
 
@@ -178,6 +193,9 @@ knowledge-forge/
 ├── src/
 │   ├── cli.js              # CLI entry point
 │   ├── ingest.js           # Source ingestion + extraction engine
+│   ├── extraction.js       # Semantic extraction use case + heuristic fallback
+│   ├── query.js            # Grounded query use case + citation validation
+│   ├── adapters/           # OpenRouter and source-reading adapters
 │   ├── lint.js             # Wiki health checker
 │   ├── server.js           # Express web UI + API
 │   └── utils.js            # Shared utilities
@@ -227,10 +245,10 @@ Run `npm run demo` to generate all of them.
 
 ## Roadmap
 
-- [ ] **LLM-powered extraction** — Use an actual LLM API for semantic concept/entity extraction instead of heuristics
+- [x] **LLM-powered extraction** — Structured semantic extraction through OpenRouter with offline heuristic fallback
 - [ ] **Full-text search API** — Integrate `qmd` or similar for proper search as the wiki grows
-- [ ] **Query mode** — Ask natural language questions, get synthesized answers with citations
-- [ ] **File-and-save** — File query answers back into the wiki as new analysis pages
+- [x] **Query mode** — Ask natural language questions and get grounded answers with wiki + raw citations
+- [x] **File-and-save** — File query answers back into the wiki as linked analysis pages
 - [ ] **Obsidian compatibility** — Open the wiki folder directly in Obsidian for graph view
 - [ ] **Marp export** — Generate slide decks from wiki content
 - [ ] **Dataview queries** — YAML frontmatter + Dataview plugin integration
