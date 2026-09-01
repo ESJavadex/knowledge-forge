@@ -176,7 +176,7 @@ LLM Wiki — Persistent knowledge base maintained by LLMs
 Usage:
   node src/cli.js init        Bootstrap wiki structure
   node src/cli.js demo        Create sample sources and ingest them
-  node src/cli.js ingest FILE Ingest a markdown source file
+  node src/cli.js ingest FILE Ingest a markdown, text, PDF, or DOCX source
   node src/cli.js query TEXT  Answer from the wiki with raw-source citations
   node src/cli.js lint        Health-check the wiki
   node src/cli.js serve       Start the web UI (localhost:3000)

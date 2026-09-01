@@ -42,7 +42,7 @@
 
 Knowledge Forge takes raw documents and turns them into a living, interconnected wiki. Not a one-shot RAG pipeline — a **compounding knowledge base** that gets richer with every source you feed it.
 
-- 📥 **Ingest** markdown/text/PDF sources → semantically extracts summaries, concepts, entities, and dates with OpenRouter
+- 📥 **Ingest** markdown/text/PDF/DOCX sources → semantically extracts summaries, concepts, entities, and dates with OpenRouter
 - 🔗 **Links** related pages together with wiki-style `[[links]]`
 - 📋 **Indexes** everything into a navigable catalog
 - 🔍 **Lints** the wiki: finds orphans, dangling links, missing metadata
@@ -115,7 +115,7 @@ Open `http://localhost:3000` and browse the wiki. The sidebar lets you filter by
 ```bash
 node src/cli.js init              # Create folder structure + special files
 node src/cli.js demo              # Create 3 sample sources and ingest them
-node src/cli.js ingest <file>     # Ingest a markdown, text, or PDF source
+node src/cli.js ingest <file>     # Ingest a markdown, text, PDF, or DOCX source
 node src/cli.js query "<question>" # Answer from wiki knowledge and save the cited analysis
 node src/cli.js lint              # Health-check: orphans, dangling links, metadata
 node src/cli.js serve             # Start the web UI (port 3000)
@@ -144,13 +144,13 @@ export OPENROUTER_MODEL="anthropic/claude-3.5-haiku" # optional
 
 When OpenRouter is enabled, source excerpts are sent to the selected model provider. Check that provider's privacy terms before ingesting sensitive personal documents.
 
-PDF ingestion uses the system `pdftotext` command (Poppler) and never modifies the file in `raw/`.
+PDF ingestion uses the system `pdftotext` command (Poppler); DOCX uses `unzip` to read `word/document.xml`. Neither path modifies the file in `raw/`.
 
 ## How It Works
 
 ### 1. Ingest
 
-Drop a `.md`, `.txt`, or `.pdf` file into `raw/` and run `ingest`. The engine:
+Drop a `.md`, `.txt`, `.pdf`, or `.docx` file into `raw/` and run `ingest`. The engine:
 
 1. Reads the immutable source and extracts a grounded summary plus relevant dates
 2. Identifies **concepts** (recurring themes) and **entities** (named people, medications, tools, products, and organizations) with the configured OpenRouter model
