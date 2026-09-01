@@ -65,6 +65,21 @@ export async function runMediaIngest(url, {
     const key = `${source.type}:${episode.id}`;
     const existing = manifest.episodes[key];
     if (!force && existing?.status === 'complete' && existing.rawPath && fs.existsSync(existing.rawPath)) {
+      if (ingest && !existing.ingestedAt) {
+        try {
+          logger.log(`\n  🧠 Compiling existing transcript: ${episode.title}`);
+          const wikiResult = await ingestFn(existing.rawPath, { logger, force: false });
+          manifest.episodes[key] = { ...existing, ingestedAt: nowIso(), ingestError: null };
+          saveManifest(manifestPath, manifest);
+          processed.push({ episode, audioPath: existing.audioPath, rawPath: existing.rawPath, wikiResult, status: 'complete' });
+        } catch (error) {
+          manifest.episodes[key] = { ...existing, ingestError: error.message, failedAt: nowIso() };
+          saveManifest(manifestPath, manifest);
+          logger.error(`  ❌ ${error.message}`);
+          failures.push({ episode, error });
+        }
+        continue;
+      }
       logger.log(`\n  ⏭️  ${episode.title}`);
       skipped.push(episode);
       continue;
@@ -113,6 +128,7 @@ export async function runMediaIngest(url, {
         rawPath,
         transcriptPath: transcript.transcriptPath || null,
         transcribedAt: nowIso(),
+        ingestedAt: ingest ? nowIso() : null,
         model,
       };
       saveManifest(manifestPath, manifest);
