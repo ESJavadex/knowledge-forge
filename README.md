@@ -123,6 +123,7 @@ node src/cli.js ingest <path>     # Ingest one file or every supported file in a
 node src/cli.js ingest --all      # Ingest raw/ recursively; unchanged hashes are skipped
 node src/cli.js ingest <path> --force # Reprocess even when the source hash is unchanged
 node src/cli.js query "<question>" # Answer from wiki knowledge and save the cited analysis
+node src/cli.js media-ingest <url> # Download, transcribe, and ingest podcast/video media
 node src/cli.js lint              # Health-check: orphans, dangling links, metadata
 node src/cli.js serve             # Start the web UI (port 3000)
 ```
@@ -133,6 +134,7 @@ Or via npm scripts:
 npm run init
 npm run demo
 npm run ingest
+npm run media-ingest -- <url> --latest 3
 npm run lint
 npm run mcp
 npm start
@@ -161,6 +163,80 @@ OCR settings:
 - `OCR_ENABLED=false` disables OCR fallback.
 - `OCR_LANGUAGES` defaults to `spa+eng`.
 - `OCR_DPI` defaults to `200`.
+
+### Podcast and video ingestion
+
+`media-ingest` accepts a YouTube channel/playlist/video, a Spotify show, or a direct podcast RSS URL. It resolves the episode catalog, downloads audio, transcribes locally with Whisper, writes one structured Markdown source per episode, and sends each completed source through the normal wiki ingestion pipeline.
+
+Prerequisites:
+
+```bash
+# Debian/Ubuntu examples
+sudo apt install ffmpeg
+pip install openai-whisper yt-dlp
+```
+
+YouTube changes frequently; keep `yt-dlp` current (`uv tool install yt-dlp --force` or the equivalent for your installer). The adapter supplies the current Node executable as the JavaScript runtime required by modern YouTube extraction.
+
+The safe default processes only the newest episode. Use `--all` explicitly for a full backfill:
+
+```bash
+# Preview without downloading
+npm run media-ingest -- "https://open.spotify.com/show/SHOW_ID" --list
+
+# Process the newest three episodes
+npm run media-ingest -- "https://open.spotify.com/show/SHOW_ID" --latest 3
+
+# Inclusive emission-date range
+npm run media-ingest -- "https://feeds.example.com/podcast.xml" \
+  --all --after 2026-01-01 --before 2026-03-31
+
+# Filter episode titles and process oldest first
+npm run media-ingest -- "https://youtube.com/@channel/videos" \
+  --all --match "inteligencia artificial" --oldest-first
+```
+
+Useful options:
+
+- `--latest N` — process at most N matching episodes (default: 1).
+- `--all` — process every matching episode.
+- `--after YYYY-MM-DD` / `--before YYYY-MM-DD` — inclusive publication-date filters.
+- `--match TEXT` — case-insensitive title filter.
+- `--oldest-first` — reverse the default newest-first order.
+- `--list` or `--dry-run` — resolve and preview without downloads.
+- `--model MODEL` — Whisper model, default `turbo`.
+- `--language CODE` — transcription language, default `es`; use `auto` for detection.
+- `--download-only` — cache audio without transcribing.
+- `--no-ingest` — create raw Markdown without compiling it into the wiki.
+- `--delete-audio` — remove cached audio after successful transcription.
+- `--force` — retry and regenerate already completed episodes.
+
+Generated audio and Whisper output are cached under `.media-cache/`; raw Markdown is written under `raw/media/<show>/`. Both locations are ignored by Git so copyrighted media and transcripts are not accidentally published. The incremental manifest skips completed episodes and records failures for safe retries.
+
+Every episode becomes one Markdown document containing frontmatter plus readable sections:
+
+```markdown
+---
+title: "Episode name"
+podcast: "Show name"
+published: "2026-09-01"
+source_url: "https://..."
+---
+
+# Episode name
+
+## Description
+
+Episode description...
+
+## Transcript
+
+### 00:00–05:00
+
+**[00:12]** Timestamped transcript...
+```
+
+Spotify's public API does not expose podcast audio. The adapter identifies the show and resolves an exact public RSS directory match. Publicly distributed shows work; Spotify-exclusive/DRM shows fail clearly instead of attempting DRM circumvention.
 
 ## How It Works
 
@@ -243,6 +319,7 @@ knowledge-forge/
 │   ├── wiki-reader.js      # Deterministic wiki navigation use cases
 │   ├── ingest-state.js     # Manifest, evidence, and timeline persistence
 │   ├── adapters/           # OpenRouter and source-reading adapters
+│   ├── media/              # Spotify/RSS/YouTube download and Whisper pipeline
 │   ├── lint.js             # Wiki health checker
 │   ├── server.js           # Express web UI + API
 │   └── utils.js            # Shared utilities
@@ -302,6 +379,7 @@ Run `npm run demo` to generate all of them.
 - [x] **Timeline** — Persist extracted dates in an automatically linked page
 - [x] **Long-document chunking** — Process all sections without middle truncation
 - [x] **MCP server** — Let coding agents browse and ingest the wiki over stdio
+- [x] **Media ingestion** — Spotify/RSS/YouTube catalogs to timestamped Markdown via local Whisper
 - [ ] **Obsidian compatibility** — Open the wiki folder directly in Obsidian for graph view
 - [ ] **Marp export** — Generate slide decks from wiki content
 - [ ] **Dataview queries** — YAML frontmatter + Dataview plugin integration
