@@ -66,6 +66,38 @@ test('creates one formatted Markdown transcript per episode and skips it increme
   assert.equal(ingested.length, 1);
 });
 
+test('a transcript created with --no-ingest is compiled later without downloading or transcribing again', async (context) => {
+  const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'knowledge-forge-media-resume-'));
+  context.after(() => fs.rmSync(fixtureRoot, { recursive: true, force: true }));
+  let downloads = 0;
+  let transcriptions = 0;
+  let ingestions = 0;
+  const common = {
+    latest: 1,
+    cacheRoot: path.join(fixtureRoot, 'cache'),
+    rawRoot: path.join(fixtureRoot, 'raw'),
+    logger: { log() {}, error() {} },
+    resolveFn: async () => ({ type: 'spotify', title: 'Show', originalUrl: 'https://spotify.test/show', episodes }),
+    downloadFn: async (_episode, outputPath) => { downloads += 1; fs.writeFileSync(outputPath, 'audio'); },
+    transcribeFn: () => {
+      transcriptions += 1;
+      return { language: 'es', text: 'Texto', segments: [{ start: 0, end: 1, text: 'Texto' }] };
+    },
+    ingestFn: async () => { ingestions += 1; return { skipped: false }; },
+  };
+
+  await runMediaIngest('https://spotify.test/show', { ...common, ingest: false });
+  assert.deepEqual({ downloads, transcriptions, ingestions }, { downloads: 1, transcriptions: 1, ingestions: 0 });
+
+  const resumed = await runMediaIngest('https://spotify.test/show', { ...common, ingest: true });
+  assert.deepEqual({ downloads, transcriptions, ingestions }, { downloads: 1, transcriptions: 1, ingestions: 1 });
+  assert.equal(resumed.processed.length, 1);
+
+  const repeated = await runMediaIngest('https://spotify.test/show', { ...common, ingest: true });
+  assert.equal(repeated.skipped.length, 1);
+  assert.equal(ingestions, 1);
+});
+
 function episode(id, title, publishedAt) {
   return {
     id,
