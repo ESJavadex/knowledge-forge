@@ -9,7 +9,6 @@ import { lintWiki } from './lint.js';
 import { startServer } from './server.js';
 import { queryWiki } from './query.js';
 import { updateTimeline } from './ingest-state.js';
-import { runMediaIngest } from './media/media-ingest.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -165,49 +164,6 @@ switch (command) {
     break;
   }
 
-  case 'media-ingest': {
-    const mediaUrl = args[1];
-    if (!mediaUrl || mediaUrl.startsWith('--')) {
-      console.error('Usage: node src/cli.js media-ingest <youtube-spotify-or-rss-url> [options]');
-      process.exitCode = 1;
-      break;
-    }
-    const optionValue = (flag, fallback = null) => {
-      const index = args.indexOf(flag);
-      if (index === -1) return fallback;
-      const value = args[index + 1];
-      if (!value || value.startsWith('--')) throw new Error(`${flag} requires a value.`);
-      return value;
-    };
-    try {
-      const dryRun = args.includes('--dry-run') || args.includes('--list');
-      const downloadOnly = args.includes('--download-only');
-      const ingestMedia = !args.includes('--no-ingest') && !downloadOnly;
-      if (!dryRun && ingestMedia) init();
-      const result = await runMediaIngest(mediaUrl, {
-        all: args.includes('--all'),
-        latest: optionValue('--latest', '1'),
-        after: optionValue('--after'),
-        before: optionValue('--before'),
-        match: optionValue('--match'),
-        oldestFirst: args.includes('--oldest-first'),
-        dryRun,
-        downloadOnly,
-        model: optionValue('--model', 'turbo'),
-        language: optionValue('--language', 'es'),
-        ingest: ingestMedia,
-        deleteAudio: args.includes('--delete-audio'),
-        force: args.includes('--force'),
-      });
-      console.log(`\n✅ Processed ${result.processed.length}; skipped ${result.skipped.length}; failed ${result.failures.length}.\n`);
-      if (result.failures.length > 0) process.exitCode = 1;
-    } catch (error) {
-      console.error(`\n❌ ${error.message}\n`);
-      process.exitCode = 1;
-    }
-    break;
-  }
-
   case 'lint':
     lintWiki();
     break;
@@ -227,8 +183,6 @@ Usage:
   node src/cli.js ingest PATH Ingest a file/directory; unchanged files are skipped
   node src/cli.js ingest --all Ingest every supported source under raw/
   node src/cli.js query TEXT  Answer from the wiki with raw-source citations
-  node src/cli.js media-ingest URL [options]
-                              Download, transcribe, and ingest YouTube/RSS/Spotify media
   node src/cli.js lint        Health-check the wiki
   node src/cli.js serve       Start the web UI (localhost:3000)
 `);
