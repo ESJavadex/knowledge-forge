@@ -4,7 +4,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { execFileSync } from 'child_process';
-import { docxXmlToText, readSourceDocument } from '../src/adapters/source-reader.js';
+import { docxXmlToText, readSourceDocument, readSourceWithEvidence } from '../src/adapters/source-reader.js';
 
 test('DOCX XML is converted to readable paragraphs, tabs, line breaks, and entities', () => {
   const xml = '<w:document><w:body><w:p><w:r><w:t>Pomada &amp; crema</w:t></w:r></w:p>'
@@ -34,6 +34,26 @@ test('source reader extracts text from real PDF and DOCX containers without modi
   assert.match(readSourceDocument(docxPath), /Pomada X el 3 de marzo de 2026/);
   assert.deepEqual(fs.readFileSync(pdfPath), pdfBefore);
   assert.deepEqual(fs.readFileSync(docxPath), docxBefore);
+});
+
+test('a scanned PDF falls back to page OCR with precise page locators', () => {
+  const calls = [];
+  const document = readSourceWithEvidence('/tmp/scanned.pdf', {
+    runCommand(command, args) {
+      calls.push(command);
+      if (command === 'pdftotext') return '   ';
+      if (command === 'pdftoppm') {
+        fs.writeFileSync(`${args.at(-1)}-1.png`, 'fake image');
+        return '';
+      }
+      if (command === 'tesseract') return 'Pomada X para la fisura, 3 de marzo de 2026';
+      throw new Error(`Unexpected command: ${command}`);
+    },
+  });
+
+  assert.equal(document.extraction, 'ocr');
+  assert.deepEqual(document.segments, [{ locator: 'page 1', text: 'Pomada X para la fisura, 3 de marzo de 2026' }]);
+  assert.deepEqual(calls, ['pdftotext', 'pdftoppm', 'tesseract']);
 });
 
 function createMinimalPdf(text) {

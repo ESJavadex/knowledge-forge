@@ -24,6 +24,11 @@ for (const extension of ['md', 'pdf', 'docx']) {
   const sourcePath = path.join(fixtureRoot, 'raw', `informe-medico.${extension}`);
   writeMedicalSource(sourcePath, extension, fixtureRoot);
   const sourceBefore = fs.readFileSync(sourcePath);
+  const evidence = {
+    md: { locator: 'section: Informe médico', quote: 'El 3 de marzo de 2026 se recetó Pomada X para una fisura anal.' },
+    pdf: { locator: 'page 1', quote: 'Pomada X para fisura anal el 3 de marzo de 2026' },
+    docx: { locator: 'paragraph 1', quote: 'El 3 de marzo de 2026 se recetó Pomada X para una fisura anal.' },
+  }[extension];
 
   const server = http.createServer(async (request, response) => {
     let body = '';
@@ -44,6 +49,8 @@ for (const extension of ['md', 'pdf', 'docx']) {
             citations: [{
               wiki_page: 'sources/informe-medico.md',
               raw_source: `raw/informe-medico.${extension}`,
+              locator: evidence.locator,
+              quote: evidence.quote,
             }],
           }],
           not_found_reason: '',
@@ -63,6 +70,8 @@ for (const extension of ['md', 'pdf', 'docx']) {
   };
 
   await runCli(['ingest', sourcePath], fixtureRoot, env);
+  const repeatedIngest = await runCli(['ingest', path.join(fixtureRoot, 'raw')], fixtureRoot, env);
+  assert.match(repeatedIngest, /skipped 1 unchanged source/);
   const queryOutput = await runCli(['query', '¿qué me recetaron para la fisura y en qué fecha?'], fixtureRoot, env);
 
   assert.match(queryOutput, /Pomada X/);
@@ -75,6 +84,14 @@ for (const extension of ['md', 'pdf', 'docx']) {
   const analysis = fs.readFileSync(path.join(fixtureRoot, 'wiki', 'analyses', analyses[0]), 'utf8');
   assert.match(analysis, /\[\[Informe Medico\]\]/);
   assert.match(analysis, new RegExp(`raw/informe-medico\\.${extension}`));
+  assert.match(analysis, new RegExp(evidence.locator.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.match(analysis, /Pomada X/);
+
+  const manifest = JSON.parse(fs.readFileSync(path.join(fixtureRoot, 'wiki', '.ingest-manifest.json'), 'utf8'));
+  assert.equal(Object.keys(manifest.sources).length, 1);
+  const timeline = fs.readFileSync(path.join(fixtureRoot, 'wiki', 'timeline.md'), 'utf8');
+  assert.match(timeline, /2026-03-03/);
+  assert.match(timeline, /\[\[Informe Medico\]\]/);
   });
 }
 

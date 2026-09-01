@@ -11,6 +11,9 @@ export const SOURCE_DIR = path.join(WIKI_DIR, 'sources');
 export const CONCEPT_DIR = path.join(WIKI_DIR, 'concepts');
 export const ENTITY_DIR = path.join(WIKI_DIR, 'entities');
 export const ANALYSIS_DIR = path.join(WIKI_DIR, 'analyses');
+export const EVIDENCE_DIR = path.join(WIKI_DIR, '.evidence');
+export const INGEST_MANIFEST_PATH = path.join(WIKI_DIR, '.ingest-manifest.json');
+export const TIMELINE_PATH = path.join(WIKI_DIR, 'timeline.md');
 
 export function ensureDir(dir) {
   fs.mkdirSync(dir, { recursive: true });
@@ -54,7 +57,7 @@ export function listMarkdownFiles(dir) {
     for (const entry of fs.readdirSync(d, { withFileTypes: true })) {
       const full = path.join(d, entry.name);
       if (entry.isDirectory()) walk(full);
-      else if (entry.name.endsWith('.md')) results.push(full);
+      else if (entry.isFile() && entry.name.endsWith('.md')) results.push(full);
     }
   }
   walk(dir);
@@ -67,6 +70,14 @@ export function wikiLink(name) {
 
 export function nowIso() {
   return new Date().toISOString();
+}
+
+export function toRawSourceReference(filePath) {
+  const relative = path.relative(RAW_DIR, path.resolve(filePath));
+  if (relative && relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative)) {
+    return `raw/${relative.split(path.sep).join('/')}`;
+  }
+  return `raw/${path.basename(filePath)}`;
 }
 
 export function extractWikiLinks(text) {

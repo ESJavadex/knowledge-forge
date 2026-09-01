@@ -8,6 +8,11 @@ const documents = [{
   type: 'source',
   rawSources: ['raw/informe-medico.pdf'],
   content: 'Se recetó una pomada el 3 de marzo.',
+  evidence: [{
+    rawSource: 'raw/informe-medico.pdf',
+    locator: 'page 2',
+    text: 'Se recetó una pomada el 3 de marzo.',
+  }],
 }];
 
 test('query validation keeps only claims with an exact wiki/raw citation pair', () => {
@@ -16,11 +21,21 @@ test('query validation keeps only claims with an exact wiki/raw citation pair', 
     claims: [
       {
         text: 'Se recetó una pomada el 3 de marzo.',
-        citations: [{ wiki_page: 'sources/informe-medico.md', raw_source: 'raw/informe-medico.pdf' }],
+        citations: [{
+          wiki_page: 'sources/informe-medico.md',
+          raw_source: 'raw/informe-medico.pdf',
+          locator: 'page 2',
+          quote: 'Se recetó una pomada el 3 de marzo.',
+        }],
       },
       {
         text: 'La dosis fue dos veces al día.',
-        citations: [{ wiki_page: 'sources/informe-medico.md', raw_source: 'raw/otro.pdf' }],
+        citations: [{
+          wiki_page: 'sources/informe-medico.md',
+          raw_source: 'raw/otro.pdf',
+          locator: 'page 2',
+          quote: 'La dosis fue dos veces al día.',
+        }],
       },
     ],
   }, documents);

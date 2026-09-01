@@ -43,11 +43,15 @@
 Knowledge Forge takes raw documents and turns them into a living, interconnected wiki. Not a one-shot RAG pipeline — a **compounding knowledge base** that gets richer with every source you feed it.
 
 - 📥 **Ingest** markdown/text/PDF/DOCX sources → semantically extracts summaries, concepts, entities, and dates with OpenRouter
+- 🧾 **OCRs** scanned PDFs when `pdftotext` finds no embedded text
+- ♻️ **Skips duplicates** with a SHA-256 ingestion manifest
 - 🔗 **Links** related pages together with wiki-style `[[links]]`
+- 🗓️ **Builds** a source-linked timeline from relevant dates
 - 📋 **Indexes** everything into a navigable catalog
 - 🔍 **Lints** the wiki: finds orphans, dangling links, missing metadata
 - 🌐 **Serves** a dark-themed web UI to browse and explore
 - 💬 **Queries** the compiled wiki in natural language with mandatory wiki + raw-source citations
+- 🔌 **Exposes MCP** so coding agents can list, search, read, navigate, and ingest the wiki
 - 📝 **Logs** every operation chronologically
 
 ## Current Status
@@ -94,7 +98,7 @@ So the right framing is:
 |---|---|---|
 | Knowledge | Re-derived every query | Compiled once, kept current |
 | Cross-references | Missing | Built-in `[[wiki links]]` |
-| Contradictions | Undetected | Flagged on ingest |
+| Contradictions | Undetected | Not implemented yet |
 | Accumulation | None — each query is independent | Compounds with every source |
 | Maintenance cost | Low (but shallow) | Near zero (LLM does the bookkeeping) |
 
@@ -115,7 +119,9 @@ Open `http://localhost:3000` and browse the wiki. The sidebar lets you filter by
 ```bash
 node src/cli.js init              # Create folder structure + special files
 node src/cli.js demo              # Create 3 sample sources and ingest them
-node src/cli.js ingest <file>     # Ingest a markdown, text, PDF, or DOCX source
+node src/cli.js ingest <path>     # Ingest one file or every supported file in a directory
+node src/cli.js ingest --all      # Ingest raw/ recursively; unchanged hashes are skipped
+node src/cli.js ingest <path> --force # Reprocess even when the source hash is unchanged
 node src/cli.js query "<question>" # Answer from wiki knowledge and save the cited analysis
 node src/cli.js lint              # Health-check: orphans, dangling links, metadata
 node src/cli.js serve             # Start the web UI (port 3000)
@@ -128,6 +134,7 @@ npm run init
 npm run demo
 npm run ingest
 npm run lint
+npm run mcp
 npm start
 ```
 
@@ -135,16 +142,25 @@ npm start
 
 Semantic extraction and natural-language queries use OpenRouter. Any OpenRouter model can be selected; Anthropic models are supported through the same adapter.
 
-```bash
-export OPENROUTER_API_KEY="..."
-export OPENROUTER_MODEL="anthropic/claude-3.5-haiku" # optional
-```
+Provide `OPENROUTER_API_KEY` to the process through your environment or secret manager. `OPENROUTER_MODEL` (or `LLM_MODEL`) optionally selects the model; the default is `anthropic/claude-3.5-haiku`.
 
-`LLM_MODEL` is also accepted as a model override. Without `OPENROUTER_API_KEY`, ingestion automatically uses the original frequency/bigram heuristic, so `init`, `demo`, `ingest`, `lint`, and `serve` keep working offline. Query mode reports that OpenRouter configuration is required.
+Without `OPENROUTER_API_KEY`, ingestion automatically uses the original frequency/bigram heuristic, so `init`, `demo`, `ingest`, `lint`, `mcp`, and `serve` keep working offline. Query mode reports that OpenRouter configuration is required.
 
 When OpenRouter is enabled, source excerpts are sent to the selected model provider. Check that provider's privacy terms before ingesting sensitive personal documents.
 
-PDF ingestion uses the system `pdftotext` command (Poppler); DOCX uses `unzip` to read `word/document.xml`. Neither path modifies the file in `raw/`.
+PDF ingestion uses `pdftotext` (Poppler); if the PDF has no embedded text it falls back to `pdftoppm` + Tesseract OCR. DOCX uses `unzip` to read `word/document.xml`. None of these paths modifies the file in `raw/`.
+
+On Debian/Ubuntu, the optional OCR runtime can be installed with:
+
+```bash
+sudo apt install poppler-utils unzip tesseract-ocr tesseract-ocr-spa tesseract-ocr-eng
+```
+
+OCR settings:
+
+- `OCR_ENABLED=false` disables OCR fallback.
+- `OCR_LANGUAGES` defaults to `spa+eng`.
+- `OCR_DPI` defaults to `200`.
 
 ## How It Works
 
@@ -152,13 +168,13 @@ PDF ingestion uses the system `pdftotext` command (Poppler); DOCX uses `unzip` t
 
 Drop a `.md`, `.txt`, `.pdf`, or `.docx` file into `raw/` and run `ingest`. The engine:
 
-1. Reads the immutable source and extracts a grounded summary plus relevant dates
-2. Identifies **concepts** (recurring themes) and **entities** (named people, medications, tools, products, and organizations) with the configured OpenRouter model
-3. Creates a source summary page in `wiki/sources/`
-4. Creates or updates concept pages in `wiki/concepts/`
-5. Creates or updates entity pages in `wiki/entities/`
-6. Links everything together with `[[wiki links]]`
-7. Updates the index and appends to the log
+1. Hashes the immutable source and skips it when the same content was already ingested
+2. Reads embedded text or performs OCR, preserving page/section/paragraph locators
+3. Splits long documents on paragraph boundaries and extracts every part—no middle truncation
+4. Extracts a grounded summary, concepts, entities, and relevant dates with the configured OpenRouter model
+5. Creates/updates source, concept, and entity pages without changing `[[wiki links]]`
+6. Stores generated citation evidence under `wiki/.evidence/`
+7. Refreshes `wiki/timeline.md`, the index, manifest, and append-only log
 
 A single source can touch 20+ wiki pages.
 
@@ -166,9 +182,34 @@ If OpenRouter is not configured or returns malformed structured output, ingestio
 
 ### 2. Query
 
-Use `node src/cli.js query "..."` or the query field in the web UI. Retrieval is a simple file/text scan over `wiki/` (no vector index or BM25). The model may emit only atomic claims backed by an exact wiki-page/raw-source pair; unsupported claims are discarded. Every result is saved under `wiki/analyses/`, linked to its supporting pages, indexed, and logged.
+Use `node src/cli.js query "..."` or the query field in the web UI. Retrieval is a simple file/text scan over `wiki/` (no vector index or BM25). The model may emit only atomic claims backed by an exact wiki page, raw source, locator, and verbatim evidence quote; unsupported claims are discarded. Every result is saved under `wiki/analyses/`, linked to its supporting pages, indexed, and logged.
 
-### 3. Lint
+### 3. MCP for coding agents
+
+Run the local stdio server with `npm run mcp`. Configure your coding agent with:
+
+```json
+{
+  "mcpServers": {
+    "knowledge-forge": {
+      "command": "node",
+      "args": ["/absolute/path/to/knowledge-forge/src/mcp-server.js"]
+    }
+  }
+}
+```
+
+The server exposes five tools:
+
+- `wiki_list` — catalog pages by type.
+- `wiki_search` — deterministic text search.
+- `wiki_read` — markdown, frontmatter, links, and raw provenance.
+- `wiki_links` — outgoing links and backlinks.
+- `wiki_ingest` — ingest only files/directories already under `raw/`.
+
+It also exposes `wiki://page/{slug}` resources. Direct arbitrary reads or writes to `raw/` are intentionally not exposed.
+
+### 4. Lint
 
 Run a health check to find:
 - 👻 **Orphan pages** — no other page links to them
@@ -186,6 +227,9 @@ knowledge-forge/
 │   ├── concepts/           # Recurring themes and topics
 │   ├── entities/           # Named things, tools, products
 │   ├── analyses/           # Synthesized answers (user queries filed back)
+│   ├── .evidence/          # Generated exact excerpts + page/section locators
+│   ├── .ingest-manifest.json # SHA-256 deduplication and extraction metadata
+│   ├── timeline.md         # Generated dated-event view
 │   ├── index.md            # Catalog of all pages
 │   └── log.md              # Append-only chronological record
 ├── schema/
@@ -195,6 +239,9 @@ knowledge-forge/
 │   ├── ingest.js           # Source ingestion + extraction engine
 │   ├── extraction.js       # Semantic extraction use case + heuristic fallback
 │   ├── query.js            # Grounded query use case + citation validation
+│   ├── mcp-server.js       # Local stdio MCP adapter
+│   ├── wiki-reader.js      # Deterministic wiki navigation use cases
+│   ├── ingest-state.js     # Manifest, evidence, and timeline persistence
 │   ├── adapters/           # OpenRouter and source-reading adapters
 │   ├── lint.js             # Wiki health checker
 │   ├── server.js           # Express web UI + API
@@ -249,6 +296,12 @@ Run `npm run demo` to generate all of them.
 - [ ] **Full-text search API** — Integrate `qmd` or similar for proper search as the wiki grows
 - [x] **Query mode** — Ask natural language questions and get grounded answers with wiki + raw citations
 - [x] **File-and-save** — File query answers back into the wiki as linked analysis pages
+- [x] **Batch + deduplication** — Recursive ingestion with SHA-256 skip logic
+- [x] **OCR fallback** — Scanned PDF extraction with page provenance
+- [x] **Precise citations** — Wiki + raw + locator + verbatim quote validation
+- [x] **Timeline** — Persist extracted dates in an automatically linked page
+- [x] **Long-document chunking** — Process all sections without middle truncation
+- [x] **MCP server** — Let coding agents browse and ingest the wiki over stdio
 - [ ] **Obsidian compatibility** — Open the wiki folder directly in Obsidian for graph view
 - [ ] **Marp export** — Generate slide decks from wiki content
 - [ ] **Dataview queries** — YAML frontmatter + Dataview plugin integration

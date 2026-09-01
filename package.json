@@ -10,9 +10,11 @@
     "demo": "node src/cli.js demo",
     "ingest": "node src/cli.js ingest",
     "lint": "node src/cli.js lint",
+    "mcp": "node src/mcp-server.js",
     "test": "node --test"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "express": "^4.21.2",
     "gray-matter": "^4.0.3",
     "marked": "^15.0.7"

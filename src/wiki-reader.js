@@ -1,0 +1,148 @@
+import fs from 'fs';
+import path from 'path';
+import matter from 'gray-matter';
+import { WIKI_DIR, extractWikiLinks, listMarkdownFiles, readText } from './utils.js';
+
+export function listWikiPages({ type, limit = 100 } = {}) {
+  return loadPages()
+    .filter((page) => !type || page.type === type)
+    .slice(0, clampLimit(limit))
+    .map(publicPage);
+}
+
+export function searchWiki(query, { type, limit = 20 } = {}) {
+  const terms = tokenize(query);
+  if (terms.length === 0) return [];
+  return loadPages().filter((page) => !type || page.type === type)
+    .map((page) => ({ ...page, score: scorePage(page, terms) }))
+    .filter((page) => page.score > 0)
+    .sort((left, right) => right.score - left.score || left.slug.localeCompare(right.slug))
+    .slice(0, clampLimit(limit))
+    .map((page) => ({ ...publicPage(page), score: page.score }));
+}
+
+export function readWikiPage(slug) {
+  const filePath = resolveWikiPath(slug);
+  if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) throw new Error(`Wiki page not found: ${slug}`);
+  const raw = readText(filePath);
+  const { data, content } = matter(raw);
+  const catalogEntry = loadPages().find((page) => page.slug === relativeSlug(filePath));
+  return {
+    slug: relativeSlug(filePath),
+    title: data.title || path.basename(filePath, '.md').replace(/-/g, ' '),
+    type: data.type || 'page',
+    frontmatter: data,
+    outgoingLinks: extractWikiLinks(content),
+    markdown: raw,
+    provenance: catalogEntry?.provenance || provenanceFromFrontmatter(data),
+  };
+}
+
+export function getWikiLinks(slug) {
+  const target = readWikiPage(slug);
+  const normalizedTitle = normalize(target.title);
+  const normalizedName = normalize(path.basename(target.slug, '.md').replace(/-/g, ' '));
+  const backlinks = loadPages().filter((page) => page.slug !== target.slug && page.links.some((link) => {
+    const normalized = normalize(link);
+    return normalized === normalizedTitle || normalized === normalizedName;
+  })).map(publicPage);
+  return { page: publicPage(target), outgoingLinks: target.outgoingLinks, backlinks };
+}
+
+function loadPages() {
+  const pages = listMarkdownFiles(WIKI_DIR).map((filePath) => {
+    const raw = readText(filePath);
+    const { data, content } = matter(raw);
+    return {
+      slug: relativeSlug(filePath),
+      title: data.title || path.basename(filePath, '.md').replace(/-/g, ' '),
+      type: data.type || 'page',
+      created: data.created || data.ingested || data.updated || null,
+      content,
+      links: extractWikiLinks(content),
+      provenance: provenanceFromFrontmatter(data),
+      frontmatter: data,
+    };
+  });
+  const sourceByTitle = new Map();
+  for (const page of pages) {
+    for (const rawSource of page.provenance.rawSources) sourceByTitle.set(normalize(page.title), rawSource);
+  }
+  for (const page of pages) {
+    const rawSources = new Set(page.provenance.rawSources);
+    for (const source of Array.isArray(page.frontmatter.sources) ? page.frontmatter.sources : []) {
+      const rawSource = sourceByTitle.get(normalize(source));
+      if (rawSource) rawSources.add(rawSource);
+    }
+    for (const link of page.links) {
+      const rawSource = sourceByTitle.get(normalize(link));
+      if (rawSource) rawSources.add(rawSource);
+    }
+    page.provenance = { rawSources: [...rawSources].sort() };
+  }
+  return pages.sort((left, right) => left.slug.localeCompare(right.slug));
+}
+
+function publicPage(page) {
+  return {
+    slug: page.slug,
+    title: page.title,
+    type: page.type,
+    created: page.created || null,
+    preview: page.content?.replace(/[#*`>\-\[\]]/g, '').replace(/\s+/g, ' ').trim().slice(0, 240) || '',
+    provenance: page.provenance || provenanceFromFrontmatter(page.frontmatter || {}),
+  };
+}
+
+function provenanceFromFrontmatter(data) {
+  const rawSources = [];
+  if (typeof data.source_file === 'string') rawSources.push(`raw/${data.source_file.replace(/\\/g, '/').replace(/^\/+/, '')}`);
+  if (Array.isArray(data.raw_sources)) rawSources.push(...data.raw_sources.filter((item) => typeof item === 'string' && item.startsWith('raw/')));
+  return { rawSources: [...new Set(rawSources)] };
+}
+
+function resolveWikiPath(slug) {
+  if (typeof slug !== 'string' || !slug.trim()) throw new Error('A wiki page slug is required.');
+  const requested = slug.endsWith('.md') ? slug : `${slug}.md`;
+  const resolved = path.resolve(WIKI_DIR, requested);
+  if (resolved !== WIKI_DIR && !resolved.startsWith(`${WIKI_DIR}${path.sep}`)) throw new Error('Wiki page path escapes wiki/.');
+  if (fs.existsSync(resolved)) {
+    const realWiki = fs.realpathSync(WIKI_DIR);
+    const realPage = fs.realpathSync(resolved);
+    if (!realPage.startsWith(`${realWiki}${path.sep}`)) throw new Error('Wiki page symlink escapes wiki/.');
+  }
+  return resolved;
+}
+
+function relativeSlug(filePath) {
+  return path.relative(WIKI_DIR, filePath).split(path.sep).join('/');
+}
+
+function scorePage(page, terms) {
+  const title = normalize(page.title);
+  const body = normalize(page.content);
+  return terms.reduce((score, term) => score + (title.includes(term) ? 8 : 0) + countMatches(body, term, 10), 0);
+}
+
+function countMatches(value, term, limit) {
+  let count = 0;
+  let cursor = 0;
+  while ((cursor = value.indexOf(term, cursor)) !== -1 && count < limit) {
+    count += 1;
+    cursor += term.length;
+  }
+  return count;
+}
+
+function tokenize(value) {
+  return [...new Set(normalize(value).split(/[^a-z0-9]+/).filter((term) => term.length > 1))];
+}
+
+function normalize(value) {
+  return String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase();
+}
+
+function clampLimit(limit) {
+  const parsed = Number.parseInt(limit, 10);
+  return Number.isInteger(parsed) ? Math.min(Math.max(parsed, 1), 200) : 100;
+}

@@ -1,33 +1,49 @@
 import fs from 'fs';
 import path from 'path';
-import { slugify, titleCase, wikiLink, nowIso, ensureDir, writeText, listMarkdownFiles, WIKI_DIR, SOURCE_DIR, CONCEPT_DIR, ENTITY_DIR } from './utils.js';
-import { readSourceDocument } from './adapters/source-reader.js';
+import { slugify, titleCase, wikiLink, nowIso, ensureDir, writeText, listMarkdownFiles, toRawSourceReference, WIKI_DIR, SOURCE_DIR, CONCEPT_DIR, ENTITY_DIR } from './utils.js';
+import { readSourceWithEvidence } from './adapters/source-reader.js';
 import { extractSemantics } from './extraction.js';
 import { createOpenRouterGenerator } from './adapters/openrouter.js';
+import { hashFile, isUnchangedSource, recordIngest, writeEvidence } from './ingest-state.js';
+
+export const SUPPORTED_SOURCE_EXTENSIONS = new Set(['.md', '.txt', '.pdf', '.docx']);
 
 /**
  * Ingest a raw source file into the wiki.
  */
 export async function ingestSource(filePath, {
   generator = createOpenRouterGenerator(),
-  sourceReader = readSourceDocument,
+  sourceReader = readSourceWithEvidence,
   logger = console,
+  force = false,
 } = {}) {
   const fileName = path.basename(filePath);
-  const text = sourceReader(filePath);
-
-  // 1. Create source summary
-  const slug = slugify(fileName.slice(0, -path.extname(fileName).length) || fileName);
+  const rawSource = toRawSourceReference(filePath);
+  const sourceFile = rawSource.slice('raw/'.length);
+  const sourceName = sourceFile.slice(0, -path.extname(sourceFile).length) || sourceFile;
+  const slug = slugify(sourceName.replace(/[\\/]/g, '-'));
   const sourceTitle = titleCase(slug.replace(/-/g, ' '));
   const sourcePath = path.join(SOURCE_DIR, `${slug}.md`);
+  const sha256 = hashFile(filePath);
+
+  if (!force && isUnchangedSource(filePath, sha256, sourcePath)) {
+    logger.log(`  ⏭️  Unchanged: ${fileName}`);
+    return { sourceTitle, skipped: true, reason: 'unchanged', touchedPages: [] };
+  }
+
+  const sourceDocument = sourceReader(filePath);
+  const document = typeof sourceDocument === 'string'
+    ? { text: sourceDocument, segments: [{ locator: 'document', text: sourceDocument }], extraction: 'text' }
+    : sourceDocument;
+  const text = document.text;
 
   const extraction = await extractSemantics({ text, fileName, generator, logger });
   const { concepts, entities, summary } = extraction;
 
   let sourceContent = `---
 type: source
-title: "${sourceTitle}"
-source_file: "${fileName}"
+title: ${JSON.stringify(sourceTitle)}
+source_file: ${JSON.stringify(sourceFile)}
 ingested: "${nowIso()}"
 concept_count: ${concepts.length}
 entity_count: ${entities.length}
@@ -35,7 +51,7 @@ entity_count: ${entities.length}
 
 # ${sourceTitle}
 
-> Source: \`${fileName}\`
+> Source: \`${sourceFile}\`
 
 ## Summary
 
@@ -57,7 +73,7 @@ ${summary}
     sourceContent += `- ${wikiLink(title)} (${e.count} mentions)\n`;
   }
 
-  sourceContent += `\n---\n> Raw source: \`raw/${fileName}\`\n`;
+  sourceContent += `\n---\n> Raw source: \`${rawSource}\`\n`;
 
   writeText(sourcePath, sourceContent);
   console.log(`  📄 Source page: wiki/sources/${slug}.md`);
@@ -79,7 +95,27 @@ ${summary}
     touchedPages.push(updateOrCreatePage(ePath, title, 'entity', sourceTitle, e.count, summary.slice(0, 200)));
   }
 
-  // 4. Update index
+  const evidencePath = writeEvidence(slug, {
+    fileName: sourceFile,
+    rawSource,
+    sha256,
+    extraction: document.extraction,
+    segments: document.segments,
+  });
+
+  recordIngest(filePath, {
+    fileName: sourceFile,
+    rawSource,
+    sourceTitle,
+    sourcePage: `sources/${slug}.md`,
+    sha256,
+    bytes: fs.statSync(filePath).size,
+    extractionMode: extraction.mode,
+    model: extraction.mode === 'heuristic' ? null : generator?.model || null,
+    relevantDates: extraction.relevantDates,
+  });
+
+  // 4. Update index and timeline
   updateIndex();
 
   // 5. Append to log
@@ -91,8 +127,33 @@ ${summary}
     entities: entities.length,
     relevantDates: extraction.relevantDates,
     extractionMode: extraction.mode,
-    touchedPages,
+    touchedPages: [...touchedPages, evidencePath],
   };
+}
+
+export async function ingestPath(inputPath, options = {}) {
+  const resolved = path.resolve(inputPath);
+  if (!fs.existsSync(resolved)) throw new Error(`Source path does not exist: ${inputPath}`);
+  const files = fs.statSync(resolved).isDirectory() ? listSourceFiles(resolved) : [resolved];
+  const supported = files.filter((file) => SUPPORTED_SOURCE_EXTENSIONS.has(path.extname(file).toLowerCase()));
+  if (supported.length === 0) throw new Error(`No supported sources found in: ${inputPath}`);
+
+  const results = [];
+  for (const file of supported) {
+    options.logger?.log?.(`\n📥 Ingesting: ${path.basename(file)}`);
+    results.push(await ingestSource(file, options));
+  }
+  return results;
+}
+
+function listSourceFiles(directory) {
+  const files = [];
+  for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+    const fullPath = path.join(directory, entry.name);
+    if (entry.isDirectory()) files.push(...listSourceFiles(fullPath));
+    else if (entry.isFile()) files.push(fullPath);
+  }
+  return files.sort();
 }
 
 function updateOrCreatePage(pagePath, title, type, sourceTitle, mentions, excerpt) {
@@ -121,10 +182,10 @@ function updateOrCreatePage(pagePath, title, type, sourceTitle, mentions, excerp
   } else {
     content = `---
 type: ${type}
-title: "${title}"
+title: ${JSON.stringify(title)}
 created: "${nowIso()}"
 mention_count: ${mentions}
-sources: ["${sourceTitle}"]
+sources: [${JSON.stringify(sourceTitle)}]
 ---
 
 # ${title}
@@ -154,6 +215,10 @@ export function updateIndex() {
   ];
 
   let index = `# Wiki Index\n\n> Auto-generated. Updated: ${nowIso()}\n\n`;
+
+  if (fs.existsSync(path.join(WIKI_DIR, 'timeline.md'))) {
+    index += `## Timeline\n\n- [[Timeline]] — \`wiki/timeline.md\`\n\n`;
+  }
 
   const categories = {
     'Sources': allPages.filter(f => f.includes('/sources/')),

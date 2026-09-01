@@ -3,11 +3,12 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { ensureDir, writeText, RAW_DIR, WIKI_DIR, SOURCE_DIR, CONCEPT_DIR, ENTITY_DIR, ANALYSIS_DIR, listMarkdownFiles } from './utils.js';
-import { ingestSource, updateIndex, appendLog } from './ingest.js';
+import { ensureDir, writeText, RAW_DIR, WIKI_DIR, SOURCE_DIR, CONCEPT_DIR, ENTITY_DIR, ANALYSIS_DIR, EVIDENCE_DIR, listMarkdownFiles } from './utils.js';
+import { ingestPath, ingestSource, updateIndex } from './ingest.js';
 import { lintWiki } from './lint.js';
 import { startServer } from './server.js';
 import { queryWiki } from './query.js';
+import { updateTimeline } from './ingest-state.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -16,7 +17,7 @@ const command = args[0];
 function init() {
   console.log('🏗️  Initializing LLM Wiki structure...\n');
 
-  for (const dir of [RAW_DIR, WIKI_DIR, SOURCE_DIR, CONCEPT_DIR, ENTITY_DIR, ANALYSIS_DIR]) {
+  for (const dir of [RAW_DIR, WIKI_DIR, SOURCE_DIR, CONCEPT_DIR, ENTITY_DIR, ANALYSIS_DIR, EVIDENCE_DIR]) {
     ensureDir(dir);
     console.log(`  📁 ${dir.replace(process.cwd() + '/', '')}`);
   }
@@ -28,7 +29,8 @@ function init() {
     console.log('  📄 wiki/log.md');
   }
 
-  // Create initial index
+  // Create generated special pages
+  updateTimeline();
   updateIndex();
 
   console.log('\n✅ Wiki structure ready.\n');
@@ -136,15 +138,17 @@ switch (command) {
 
   case 'ingest': {
     init();
-    const file = args[1];
-    if (!file) {
-      console.error('Usage: node src/cli.js ingest <file.md>');
+    const requested = args[1] === '--all' ? RAW_DIR : args[1];
+    if (!requested) {
+      console.error('Usage: node src/cli.js ingest <file-or-directory> [--force] | ingest --all');
       process.exit(1);
     }
-    console.log(`\n📥 Ingesting: ${file}`);
-    const result = await ingestSource(path.resolve(file));
-    console.log(`  Extraction: ${result.extractionMode}`);
-    console.log();
+    const results = await ingestPath(path.resolve(requested), {
+      force: args.includes('--force'),
+      logger: console,
+    });
+    const skipped = results.filter((result) => result.skipped).length;
+    console.log(`\n✅ Ingested ${results.length - skipped}; skipped ${skipped} unchanged source(s).\n`);
     break;
   }
 
@@ -176,7 +180,8 @@ LLM Wiki — Persistent knowledge base maintained by LLMs
 Usage:
   node src/cli.js init        Bootstrap wiki structure
   node src/cli.js demo        Create sample sources and ingest them
-  node src/cli.js ingest FILE Ingest a markdown, text, PDF, or DOCX source
+  node src/cli.js ingest PATH Ingest a file/directory; unchanged files are skipped
+  node src/cli.js ingest --all Ingest every supported source under raw/
   node src/cli.js query TEXT  Answer from the wiki with raw-source citations
   node src/cli.js lint        Health-check the wiki
   node src/cli.js serve       Start the web UI (localhost:3000)

@@ -77,29 +77,92 @@ export function heuristicExtract(text) {
 export async function extractSemantics({ text, fileName, generator, logger = console }) {
   if (!generator?.available) return heuristicExtract(text);
 
-  const maxChars = positiveInteger(process.env.LLM_MAX_INPUT_CHARS, 160_000);
-  const sourceText = text.length > maxChars
-    ? `${text.slice(0, Math.floor(maxChars * 0.75))}\n\n[...middle omitted...]\n\n${text.slice(-Math.floor(maxChars * 0.25))}`
-    : text;
+  const maxChars = positiveInteger(process.env.LLM_CHUNK_CHARS, 60_000);
+  const chunks = splitTextIntoChunks(text, maxChars);
+  const extractions = [];
 
-  try {
-    const raw = await generator.generateJson({
-      schemaName: 'knowledge_extraction',
-      schema: EXTRACTION_SCHEMA,
-      system: [
-        'You extract grounded knowledge from personal documents for a private wiki.',
-        'Return only facts explicitly present in the source. Never infer diagnoses, treatments, dates, identities, or missing details.',
-        'Write the summary in the source language. Include important relationships between treatments/events and their dates in the summary.',
-        'Concepts are recurring topics. Entities are named people, organizations, medications, products, places, tests, or conditions.',
-        'Keep names faithful to the source and make each item concise and unique.',
-      ].join(' '),
-      prompt: `Source file: ${fileName}\n\n<source>\n${sourceText}\n</source>`,
-    });
-    return normalizeExtraction(raw, text);
-  } catch (error) {
-    logger.warn(`  ⚠️  Semantic extraction failed (${error.message}); using heuristic fallback.`);
-    return heuristicExtract(text);
+  for (let index = 0; index < chunks.length; index += 1) {
+    const chunk = chunks[index];
+    try {
+      const raw = await generator.generateJson({
+        schemaName: 'knowledge_extraction',
+        schema: EXTRACTION_SCHEMA,
+        system: [
+          'You extract grounded knowledge from personal documents for a private wiki.',
+          'Return only facts explicitly present in the source. Never infer diagnoses, treatments, dates, identities, or missing details.',
+          'Write the summary in the source language. Include important relationships between treatments/events and their dates in the summary.',
+          'Normalize complete relevant dates as YYYY-MM-DD when the source makes the date unambiguous; preserve partial or uncertain dates explicitly.',
+          'Concepts are recurring topics. Entities are named people, organizations, medications, products, places, tests, or conditions.',
+          'Keep names faithful to the source and make each item concise and unique.',
+        ].join(' '),
+        prompt: `Source file: ${fileName}\nPart ${index + 1} of ${chunks.length}\n\n<source>\n${chunk}\n</source>`,
+      });
+      extractions.push(normalizeExtraction(raw, chunk));
+    } catch (error) {
+      logger.warn(`  ⚠️  Semantic extraction failed for part ${index + 1}/${chunks.length} (${error.message}); using heuristic fallback for that part.`);
+      extractions.push(heuristicExtract(chunk));
+    }
   }
+
+  return mergeExtractions(extractions, text);
+}
+
+export function splitTextIntoChunks(text, maxChars = 60_000) {
+  if (text.length <= maxChars) return [text];
+  const paragraphs = text.split(/\n\s*\n/);
+  const chunks = [];
+  let current = '';
+
+  const pushCurrent = () => {
+    if (current.trim()) chunks.push(current.trim());
+    current = '';
+  };
+
+  for (const paragraph of paragraphs) {
+    if (paragraph.length > maxChars) {
+      pushCurrent();
+      for (let offset = 0; offset < paragraph.length; offset += maxChars) {
+        chunks.push(paragraph.slice(offset, offset + maxChars));
+      }
+      continue;
+    }
+    const candidate = current ? `${current}\n\n${paragraph}` : paragraph;
+    if (candidate.length > maxChars) pushCurrent();
+    current = current ? `${current}\n\n${paragraph}` : paragraph;
+  }
+  pushCurrent();
+  return chunks;
+}
+
+function mergeExtractions(extractions, sourceText) {
+  const summaries = [...new Set(extractions.map((item) => item.summary).filter(Boolean))];
+  const concepts = mergeNames(extractions.flatMap((item) => item.concepts), sourceText);
+  const entities = mergeNames(extractions.flatMap((item) => item.entities), sourceText);
+  const dates = new Map();
+  for (const item of extractions.flatMap((extraction) => extraction.relevantDates)) {
+    const key = `${item.date.toLocaleLowerCase()}\u0000${item.description.toLocaleLowerCase()}`;
+    if (!dates.has(key)) dates.set(key, item);
+  }
+  const modes = new Set(extractions.map((item) => item.mode));
+  return {
+    summary: summaries.join(' ').slice(0, 2_000) || 'No summary available.',
+    concepts,
+    entities,
+    relevantDates: [...dates.values()].slice(0, 30),
+    mode: modes.size === 1 ? [...modes][0] : 'hybrid',
+  };
+}
+
+function mergeNames(items, sourceText) {
+  const names = new Map();
+  for (const item of items) {
+    const key = item.name.toLocaleLowerCase();
+    if (!names.has(key)) names.set(key, item.name);
+  }
+  return [...names.values()].slice(0, 15).map((name) => ({
+    name,
+    count: countOccurrences(sourceText, name) || 1,
+  }));
 }
 
 function normalizeExtraction(value, sourceText) {
