@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { validateGroundedAnswer } from '../src/query.js';
+import { fitDocumentsToByteBudget, validateGroundedAnswer } from '../src/query.js';
 
 const documents = [{
   wikiPage: 'sources/informe-medico.md',
@@ -52,4 +52,19 @@ test('query validation returns not found when every model claim is unsupported',
   }, documents);
 
   assert.deepEqual(result, { found: false, claims: [] });
+});
+
+test('query context stays below the process argument byte budget', () => {
+  const largeDocuments = Array.from({ length: 12 }, (_, index) => ({
+    ...documents[0],
+    wikiPage: `sources/page-${index}.md`,
+    content: 'ñ'.repeat(10_000),
+    evidence: [{ ...documents[0].evidence[0], text: 'á'.repeat(10_000) }],
+  }));
+
+  const selected = fitDocumentsToByteBudget(largeDocuments, 80_000);
+
+  assert.ok(selected.length > 0);
+  assert.ok(selected.length < largeDocuments.length);
+  assert.ok(Buffer.byteLength(JSON.stringify(selected), 'utf8') <= 80_000);
 });
