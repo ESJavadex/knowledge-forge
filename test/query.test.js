@@ -54,6 +54,34 @@ test('query validation returns not found when every model claim is unsupported',
   assert.deepEqual(result, { found: false, claims: [] });
 });
 
+test('query validation rejects a claim broader than its citation and a truncated quote', () => {
+  const result = validateGroundedAnswer({
+    found: true,
+    claims: [
+      {
+        text: 'Reducir la grasa visceral reduce la inflamación sistémica y aumenta la longevidad.',
+        citations: [{
+          wiki_page: 'sources/informe-medico.md',
+          raw_source: 'raw/informe-medico.pdf',
+          locator: 'page 2',
+          quote: 'Se recetó una pomada el 3 de marzo.',
+        }],
+      },
+      {
+        text: 'Se recetó una pomada el 3 de marzo y el tratamiento fue completo.',
+        citations: [{
+          wiki_page: 'sources/informe-medico.md',
+          raw_source: 'raw/informe-medico.pdf',
+          locator: 'page 2',
+          quote: 'Se recetó una pomada el',
+        }],
+      },
+    ],
+  }, documents);
+
+  assert.deepEqual(result, { found: false, claims: [] });
+});
+
 test('query context stays below the process argument byte budget', () => {
   const largeDocuments = Array.from({ length: 12 }, (_, index) => ({
     ...documents[0],

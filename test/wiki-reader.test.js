@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { getWikiLinks, listWikiPages, readWikiPage, searchWiki } from '../src/wiki-reader.js';
+import { getWikiContext, getWikiLinks, listWikiPages, readWikiPage, searchWiki } from '../src/wiki-reader.js';
 
 test('wiki navigation use cases list, search, read, and follow backlinks', () => {
   const sources = listWikiPages({ type: 'source' });
@@ -8,6 +8,11 @@ test('wiki navigation use cases list, search, read, and follow backlinks', () =>
 
   const matches = searchWiki('knowledge graph', { limit: 3 });
   assert.equal(matches[0].slug, 'sources/knowledge-graphs-ai.md');
+  assert.ok(!matches.some((page) => page.slug === 'index.md' || page.slug === 'log.md'));
+
+  const context = getWikiContext('knowledge graph', { limit: 3 });
+  assert.ok(!context.pages.some((page) => page.slug === 'index.md' || page.slug === 'log.md'));
+  assert.ok(context.characters <= context.maxChars);
 
   const source = readWikiPage('sources/knowledge-graphs-ai.md');
   assert.deepEqual(source.provenance.rawSources, ['raw/knowledge-graphs-ai.md']);
