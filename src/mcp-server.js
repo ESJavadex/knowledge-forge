@@ -16,7 +16,7 @@ import {
 import { RAW_DIR } from './utils.js';
 import { ingestPath } from './ingest.js';
 import { createOpenClawGenerator } from './adapters/openclaw.js';
-import { getWikiContext, getWikiFacets, getWikiLinks, getWikiStatus, listWikiPages, readWikiPage, searchWiki } from './wiki-reader.js';
+import { getWikiContextHybrid, getWikiFacets, getWikiLinks, getWikiStatus, listWikiPages, readWikiPage, searchWikiHybrid } from './wiki-reader.js';
 
 // stdout belongs exclusively to the MCP stdio transport.
 console.log = (...args) => console.error(...args);
@@ -36,7 +36,7 @@ const readTools = [
   },
   {
     name: 'wiki_search',
-    description: 'Search page titles and markdown text using deterministic lexical matching.',
+    description: 'Search source pages with hybrid lexical + semantic retrieval when the local index is available, with deterministic lexical fallback.',
     inputSchema: objectSchema(filterProperties({ query: { type: 'string', minLength: 1 }, limit: { type: 'integer', minimum: 1, maximum: 200 } }), ['query']),
     annotations: { readOnlyHint: true, idempotentHint: true },
   },
@@ -89,10 +89,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         result = listWikiPages(args);
         break;
       case 'wiki_search':
-        result = searchWiki(requireString(args.query, 'query'), args);
+        result = await searchWikiHybrid(requireString(args.query, 'query'), args);
         break;
       case 'wiki_context':
-        result = getWikiContext(requireString(args.query, 'query'), { ...args, maxChars: args.max_chars });
+        result = await getWikiContextHybrid(requireString(args.query, 'query'), { ...args, maxChars: args.max_chars });
         break;
       case 'wiki_facets':
         result = getWikiFacets();

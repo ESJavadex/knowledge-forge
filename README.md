@@ -189,7 +189,23 @@ If OpenRouter is not configured or returns malformed structured output, ingestio
 
 ### 2. Query
 
-Use `node src/cli.js query "..."` or the query field in the web UI. Retrieval is a simple file/text scan over `wiki/` (no vector index or BM25). The model may emit only atomic claims backed by an exact wiki page, raw source, locator, and verbatim evidence quote; unsupported claims are discarded. Every result is saved under `wiki/analyses/`, linked to its supporting pages, indexed, and logged.
+Use `node src/cli.js query "..."` or the query field in the web UI. The answer is organized into useful sections such as conclusions, actions, cross-source consensus, disagreements, and caveats. A single source may support several independently cited items; answers are not limited to one conclusion per Markdown file. The model may emit only atomic claims backed by an exact wiki page, raw source, locator, and verbatim evidence quote; unsupported claims and quantities absent from the quote are discarded. Every result is saved under `wiki/analyses/`, linked to its supporting pages, indexed, and logged.
+
+### Hybrid search
+
+Knowledge Forge can use a local [QMD](https://github.com/tobi/qmd) sidecar to combine BM25/full-text and semantic vector retrieval. Both the web query flow and MCP use the same adapter. Only `wiki/sources/**/*.md` should be indexed; navigation pages and generated analyses must stay out of the search corpus.
+
+```bash
+npm install --global @tobilu/qmd
+export XDG_CONFIG_HOME="$HOME/.config/knowledge-forge-qmd"
+export XDG_CACHE_HOME="$HOME/.cache/knowledge-forge-qmd"
+qmd collection add "$PWD/wiki" --name forge --mask 'sources/**/*.md'
+qmd update
+qmd embed -c forge
+qmd mcp --http --host 127.0.0.1 --port 8181
+```
+
+The endpoint is local-only and unauthenticated, so it must not be exposed directly to the network. Knowledge Forge connects to `http://127.0.0.1:8181` by default. Override it with `KNOWLEDGE_FORGE_QMD_URL`, or set that variable to `off` to force deterministic lexical fallback. `KNOWLEDGE_FORGE_QMD_REQUIRED=true` makes queries fail instead of falling back when the sidecar is unavailable.
 
 ### 3. MCP for coding agents
 

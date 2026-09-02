@@ -51,7 +51,7 @@ test('query validation returns not found when every model claim is unsupported',
     claims: [{ text: 'Invented', citations: [] }],
   }, documents);
 
-  assert.deepEqual(result, { found: false, claims: [] });
+  assert.deepEqual(result, { found: false, sections: [], claims: [] });
 });
 
 test('query validation rejects a claim broader than its citation and a truncated quote', () => {
@@ -79,7 +79,64 @@ test('query validation rejects a claim broader than its citation and a truncated
     ],
   }, documents);
 
-  assert.deepEqual(result, { found: false, claims: [] });
+  assert.deepEqual(result, { found: false, sections: [], claims: [] });
+});
+
+test('query validation preserves rich sections and multiple claims from one document', () => {
+  const result = validateGroundedAnswer({
+    found: true,
+    sections: [{
+      title: 'Conclusiones',
+      kind: 'conclusions',
+      items: [
+        {
+          text: 'Se recetó una pomada el 3 de marzo.',
+          citations: [{
+            wiki_page: 'sources/informe-medico.md',
+            raw_source: 'raw/informe-medico.pdf',
+            locator: 'page 2',
+            quote: 'Se recetó una pomada el 3 de marzo.',
+          }],
+        },
+        {
+          text: 'La pomada se recetó el 3 de marzo.',
+          citations: [{
+            wiki_page: 'sources/informe-medico.md',
+            raw_source: 'raw/informe-medico.pdf',
+            locator: 'page 2',
+            quote: 'Se recetó una pomada el 3 de marzo.',
+          }],
+        },
+      ],
+    }],
+  }, documents);
+
+  assert.equal(result.found, true);
+  assert.equal(result.sections.length, 1);
+  assert.equal(result.sections[0].items.length, 2);
+  assert.equal(result.claims.length, 2);
+});
+
+test('query validation rejects unsupported quantities even when the surrounding wording overlaps', () => {
+  const result = validateGroundedAnswer({
+    found: true,
+    sections: [{
+      title: 'Acciones',
+      kind: 'actions',
+      items: [{
+        text: 'Se recetó una pomada dos veces al día durante 30 días.',
+        citations: [{
+          wiki_page: 'sources/informe-medico.md',
+          raw_source: 'raw/informe-medico.pdf',
+          locator: 'page 2',
+          quote: 'Se recetó una pomada el 3 de marzo.',
+        }],
+      }],
+    }],
+  }, documents);
+
+  assert.equal(result.found, false);
+  assert.deepEqual(result.sections, []);
 });
 
 test('query context stays below the process argument byte budget', () => {
