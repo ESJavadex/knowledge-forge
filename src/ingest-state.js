@@ -30,9 +30,15 @@ export function manifestKey(filePath) {
   return path.relative(path.join(WIKI_DIR, '..'), filePath).split(path.sep).join('/');
 }
 
-export function isUnchangedSource(filePath, hash, sourcePage) {
+export function isUnchangedSource(filePath, hash, sourcePage, {
+  requiredModel,
+  requiredSchemaVersion,
+} = {}) {
   const record = readIngestManifest().sources[manifestKey(filePath)];
-  return record?.sha256 === hash && fs.existsSync(sourcePage);
+  if (record?.sha256 !== hash || !fs.existsSync(sourcePage)) return false;
+  if (requiredModel && record.model !== requiredModel) return false;
+  if (requiredSchemaVersion && record.extractionSchemaVersion !== requiredSchemaVersion) return false;
+  return true;
 }
 
 export function recordIngest(filePath, record) {

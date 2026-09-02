@@ -1,12 +1,14 @@
 import fs from 'fs';
 import path from 'path';
-import { slugify, titleCase, wikiLink, nowIso, ensureDir, writeText, listMarkdownFiles, toRawSourceReference, WIKI_DIR, SOURCE_DIR, CONCEPT_DIR, ENTITY_DIR } from './utils.js';
+import matter from 'gray-matter';
+import { slugify, titleCase, wikiLink, nowIso, ensureDir, readText, writeText, listMarkdownFiles, toRawSourceReference, WIKI_DIR, SOURCE_DIR, CONCEPT_DIR, ENTITY_DIR } from './utils.js';
 import { readSourceWithEvidence } from './adapters/source-reader.js';
 import { extractSemantics } from './extraction.js';
 import { createOpenRouterGenerator } from './adapters/openrouter.js';
 import { hashFile, isUnchangedSource, recordIngest, writeEvidence } from './ingest-state.js';
 
 export const SUPPORTED_SOURCE_EXTENSIONS = new Set(['.md', '.txt', '.pdf', '.docx']);
+export const EXTRACTION_SCHEMA_VERSION = 4;
 
 /**
  * Ingest a raw source file into the wiki.
@@ -16,17 +18,22 @@ export async function ingestSource(filePath, {
   sourceReader = readSourceWithEvidence,
   logger = console,
   force = false,
+  requireSemantic = process.env.LLM_REQUIRE_SEMANTIC === 'true',
 } = {}) {
   const fileName = path.basename(filePath);
   const rawSource = toRawSourceReference(filePath);
   const sourceFile = rawSource.slice('raw/'.length);
   const sourceName = sourceFile.slice(0, -path.extname(sourceFile).length) || sourceFile;
   const slug = slugify(sourceName.replace(/[\\/]/g, '-'));
-  const sourceTitle = titleCase(slug.replace(/-/g, ' '));
+  const sourceMetadata = readSourceMetadata(filePath);
+  const sourceTitle = deriveSourceTitle(sourceMetadata, slug);
   const sourcePath = path.join(SOURCE_DIR, `${slug}.md`);
   const sha256 = hashFile(filePath);
 
-  if (!force && isUnchangedSource(filePath, sha256, sourcePath)) {
+  if (!force && isUnchangedSource(filePath, sha256, sourcePath, {
+    requiredModel: requireSemantic ? generator?.model : undefined,
+    requiredSchemaVersion: EXTRACTION_SCHEMA_VERSION,
+  })) {
     logger.log(`  ⏭️  Unchanged: ${fileName}`);
     return { sourceTitle, skipped: true, reason: 'unchanged', touchedPages: [] };
   }
@@ -37,8 +44,18 @@ export async function ingestSource(filePath, {
     : sourceDocument;
   const text = document.text;
 
-  const extraction = await extractSemantics({ text, fileName, generator, logger });
-  const { concepts, entities, summary } = extraction;
+  const extraction = await extractSemantics({ text, fileName, generator, logger, requireSemantic });
+  const {
+    categories = [],
+    concepts,
+    entities,
+    summary,
+    keyPoints = [],
+    conclusions = [],
+    recommendations = [],
+    notableQuotes = [],
+    openQuestions = [],
+  } = extraction;
 
   let sourceContent = `---
 type: source
@@ -47,6 +64,10 @@ source_file: ${JSON.stringify(sourceFile)}
 ingested: "${nowIso()}"
 concept_count: ${concepts.length}
 entity_count: ${entities.length}
+categories: ${JSON.stringify(categories)}
+extraction_mode: ${JSON.stringify(extraction.mode)}
+model: ${JSON.stringify(extraction.mode === 'heuristic' ? null : generator?.model || null)}
+${renderOptionalFrontmatter(sourceMetadata)}
 ---
 
 # ${sourceTitle}
@@ -56,6 +77,30 @@ entity_count: ${entities.length}
 ## Summary
 
 ${summary}
+
+## Categories
+
+${renderWikiList(categories)}
+
+## Key Points
+
+${renderList(keyPoints)}
+
+## Conclusions
+
+${renderList(conclusions)}
+
+## Recommendations From the Source
+
+${renderList(recommendations)}
+
+## Notable Quotes
+
+${renderQuotes(notableQuotes)}
+
+## Open Questions and Uncertainty
+
+${renderList(openQuestions)}
 
 ## Key Concepts
 
@@ -80,7 +125,11 @@ ${summary}
 
   // 2. Update concept pages
   const touchedPages = [sourcePath];
-  for (const c of concepts.slice(0, 10)) {
+  const conceptCandidates = dedupeNamedItems([
+    ...categories.map((name) => ({ name, count: 1 })),
+    ...concepts,
+  ]);
+  for (const c of conceptCandidates.slice(0, 15)) {
     const title = titleCase(c.name);
     const cSlug = slugify(c.name);
     const cPath = path.join(CONCEPT_DIR, `${cSlug}.md`);
@@ -111,7 +160,10 @@ ${summary}
     sha256,
     bytes: fs.statSync(filePath).size,
     extractionMode: extraction.mode,
+    extractionSchemaVersion: EXTRACTION_SCHEMA_VERSION,
     model: extraction.mode === 'heuristic' ? null : generator?.model || null,
+    categories,
+    sourceMetadata,
     relevantDates: extraction.relevantDates,
   });
 
@@ -129,6 +181,57 @@ ${summary}
     extractionMode: extraction.mode,
     touchedPages: [...touchedPages, evidencePath],
   };
+}
+
+function readSourceMetadata(filePath) {
+  if (path.extname(filePath).toLowerCase() === '.md') {
+    const parsed = matter(fs.readFileSync(filePath, 'utf8'));
+    const metadata = { ...parsed.data };
+    Object.defineProperty(metadata, '_heading', { value: parsed.content.match(/^#\s+(.+)$/m)?.[1]?.trim() || '' });
+    return metadata;
+  }
+  return {};
+}
+
+function deriveSourceTitle(metadata, fallbackSlug) {
+  if (metadata && typeof metadata === 'object') {
+    const title = typeof metadata.title === 'string' ? metadata.title.trim() : '';
+    const collection = typeof metadata.podcast === 'string' ? metadata.podcast.trim() : '';
+    if (title) return collection ? `${collection} — ${title}` : title;
+    if (metadata._heading) return metadata._heading;
+  }
+  return titleCase(fallbackSlug.replace(/-/g, ' '));
+}
+
+function renderOptionalFrontmatter(metadata) {
+  const allowed = ['podcast', 'published', 'source_type', 'source_url', 'show_url', 'duration_seconds'];
+  return allowed
+    .filter((key) => ['string', 'number'].includes(typeof metadata[key]))
+    .map((key) => `${key}: ${JSON.stringify(metadata[key])}`)
+    .join('\n');
+}
+
+function renderList(items) {
+  return items.length > 0 ? items.map((item) => `- ${item}`).join('\n') : '_None extracted._';
+}
+
+function renderWikiList(items) {
+  return items.length > 0 ? items.map((item) => `- ${wikiLink(titleCase(item))}`).join('\n') : '_None extracted._';
+}
+
+function renderQuotes(items) {
+  if (items.length === 0) return '_None extracted._';
+  return items.map(({ quote, context }) => `> “${quote}”${context ? `\n> — ${context}` : ''}`).join('\n\n');
+}
+
+function dedupeNamedItems(items) {
+  const seen = new Set();
+  return items.filter((item) => {
+    const key = item.name.toLocaleLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 export async function ingestPath(inputPath, options = {}) {

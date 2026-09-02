@@ -42,7 +42,7 @@
 
 Knowledge Forge takes raw documents and turns them into a living, interconnected wiki. Not a one-shot RAG pipeline — a **compounding knowledge base** that gets richer with every source you feed it.
 
-- 📥 **Ingest** markdown/text/PDF/DOCX sources → semantically extracts summaries, concepts, entities, and dates with OpenRouter
+- 📥 **Ingest** markdown/text/PDF/DOCX sources → semantically extracts grounded summaries, categories, key points, conclusions, recommendations, quotes, concepts, entities, questions, and dates
 - 🧾 **OCRs** scanned PDFs when `pdftotext` finds no embedded text
 - ♻️ **Skips duplicates** with a SHA-256 ingestion manifest
 - 🔗 **Links** related pages together with wiki-style `[[links]]`
@@ -122,6 +122,8 @@ node src/cli.js demo              # Create 3 sample sources and ingest them
 node src/cli.js ingest <path>     # Ingest one file or every supported file in a directory
 node src/cli.js ingest --all      # Ingest raw/ recursively; unchanged hashes are skipped
 node src/cli.js ingest <path> --force # Reprocess even when the source hash is unchanged
+node src/cli.js ingest <path> --provider openclaw --model zai/glm-5.3-flash --require-llm
+                                  # Use the exact Z.AI model configured in OpenClaw; fail closed
 node src/cli.js query "<question>" # Answer from wiki knowledge and save the cited analysis
 node src/cli.js lint              # Health-check: orphans, dangling links, metadata
 node src/cli.js serve             # Start the web UI (port 3000)
@@ -138,11 +140,16 @@ npm run mcp
 npm start
 ```
 
-### OpenRouter configuration
+### Model-provider configuration
 
-Semantic extraction and natural-language queries use OpenRouter. Any OpenRouter model can be selected; Anthropic models are supported through the same adapter.
+Semantic extraction supports two adapters:
 
-Provide `OPENROUTER_API_KEY` to the process through your environment or secret manager. `OPENROUTER_MODEL` (or `LLM_MODEL`) optionally selects the model; the default is `anthropic/claude-3.5-haiku`.
+- `--provider openclaw` uses OpenClaw's stored provider authentication through a lean, isolated `infer model run` call. It sends no agent history, tools, memory, or workspace context. The recommended podcast pipeline uses `zai/glm-5.3-flash` through this adapter.
+- `--provider openrouter` uses the existing OpenRouter adapter and remains the default for backwards compatibility.
+
+Rich ingestion extracts a grounded summary, categories, key points, concepts, entities, conclusions, source-attributed recommendations, notable verbatim quotes, open questions, and relevant dates. Use `--require-llm` for production jobs where a heuristic fallback would be unacceptable.
+
+For OpenClaw, authenticate and allow the selected model in OpenClaw itself; no provider credential is copied into this repository. For OpenRouter, provide `OPENROUTER_API_KEY` through your environment or secret manager. `OPENROUTER_MODEL` (or `LLM_MODEL`) optionally selects its model.
 
 Without `OPENROUTER_API_KEY`, ingestion automatically uses the original frequency/bigram heuristic, so `init`, `demo`, `ingest`, `lint`, `mcp`, and `serve` keep working offline. Query mode reports that OpenRouter configuration is required.
 
@@ -171,7 +178,7 @@ Drop a `.md`, `.txt`, `.pdf`, or `.docx` file into `raw/` and run `ingest`. The 
 1. Hashes the immutable source and skips it when the same content was already ingested
 2. Reads embedded text or performs OCR, preserving page/section/paragraph locators
 3. Splits long documents on paragraph boundaries and extracts every part—no middle truncation
-4. Extracts a grounded summary, concepts, entities, and relevant dates with the configured OpenRouter model
+4. Extracts grounded summaries, categories, key points, conclusions, source-attributed recommendations, exact quotes, open questions, concepts, entities, and dates with the configured model
 5. Creates/updates source, concept, and entity pages without changing `[[wiki links]]`
 6. Stores generated citation evidence under `wiki/.evidence/`
 7. Refreshes `wiki/timeline.md`, the index, manifest, and append-only log
@@ -199,15 +206,35 @@ Run the local stdio server with `npm run mcp`. Configure your coding agent with:
 }
 ```
 
-The server exposes five tools:
+The server exposes eight focused tools:
 
 - `wiki_list` — catalog pages by type.
 - `wiki_search` — deterministic text search.
+- `wiki_context` — compact, ranked context bundle with raw provenance for agent prompts.
+- `wiki_facets` — counts by type, category, podcast, and extraction model.
+- `wiki_status` — ingestion/model/schema status.
 - `wiki_read` — markdown, frontmatter, links, and raw provenance.
 - `wiki_links` — outgoing links and backlinks.
-- `wiki_ingest` — ingest only files/directories already under `raw/`.
+- `wiki_ingest` — optional write tool for files/directories already under `raw/`, using grounded `zai/glm-5.3-flash` extraction. It is hidden and rejected by default; enable it only for a trusted client with `KNOWLEDGE_FORGE_MCP_ALLOW_INGEST=true`.
 
-It also exposes `wiki://page/{slug}` resources. Direct arbitrary reads or writes to `raw/` are intentionally not exposed.
+It also exposes `wiki://page/{slug}`, `wiki://catalog`, and `wiki://status` resources plus a `grounded_wiki_research` prompt. Direct arbitrary reads or writes to `raw/` are intentionally not exposed.
+
+Register the read-only server with common local clients:
+
+```bash
+openclaw mcp add knowledge-forge --command /usr/bin/node \
+  --arg /absolute/path/to/knowledge-forge/src/mcp-server.js \
+  --include wiki_list,wiki_search,wiki_context,wiki_facets,wiki_status,wiki_read,wiki_links \
+  --parallel --approval auto
+
+codex mcp add knowledge-forge -- \
+  /usr/bin/node /absolute/path/to/knowledge-forge/src/mcp-server.js
+
+claude mcp add --scope user knowledge-forge -- \
+  /usr/bin/node /absolute/path/to/knowledge-forge/src/mcp-server.js
+```
+
+The MCP defaults to read-only even when a client has no tool-filter support. Set `KNOWLEDGE_FORGE_MCP_ALLOW_INGEST=true` only for a trusted ingestion client.
 
 ### 4. Lint
 

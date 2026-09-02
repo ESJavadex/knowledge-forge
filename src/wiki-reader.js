@@ -3,22 +3,71 @@ import path from 'path';
 import matter from 'gray-matter';
 import { WIKI_DIR, extractWikiLinks, listMarkdownFiles, readText } from './utils.js';
 
-export function listWikiPages({ type, limit = 100 } = {}) {
+export function listWikiPages({ type, category, podcast, from, to, limit = 100 } = {}) {
   return loadPages()
-    .filter((page) => !type || page.type === type)
+    .filter((page) => matchesFilters(page, { type, category, podcast, from, to }))
     .slice(0, clampLimit(limit))
     .map(publicPage);
 }
 
-export function searchWiki(query, { type, limit = 20 } = {}) {
+export function searchWiki(query, { type, category, podcast, from, to, limit = 20 } = {}) {
   const terms = tokenize(query);
   if (terms.length === 0) return [];
-  return loadPages().filter((page) => !type || page.type === type)
+  return loadPages().filter((page) => matchesFilters(page, { type, category, podcast, from, to }))
     .map((page) => ({ ...page, score: scorePage(page, terms) }))
     .filter((page) => page.score > 0)
     .sort((left, right) => right.score - left.score || left.slug.localeCompare(right.slug))
     .slice(0, clampLimit(limit))
     .map((page) => ({ ...publicPage(page), score: page.score }));
+}
+
+export function getWikiContext(query, { maxChars = 24_000, limit = 8, ...filters } = {}) {
+  const budget = Math.min(Math.max(Number.parseInt(maxChars, 10) || 24_000, 1_000), 80_000);
+  const matches = searchWiki(query, { ...filters, limit: Math.min(clampLimit(limit), 20) });
+  const pages = [];
+  let used = 0;
+  for (const match of matches) {
+    const page = readWikiPage(match.slug);
+    const header = `# ${page.title}\nWiki page: ${page.slug}\nRaw sources: ${page.provenance.rawSources.join(', ') || 'none'}\n\n`;
+    const remaining = budget - used - header.length;
+    if (remaining <= 0) break;
+    const markdown = page.markdown.slice(0, remaining);
+    pages.push({
+      slug: page.slug,
+      title: page.title,
+      type: page.type,
+      score: match.score,
+      provenance: page.provenance,
+      markdown,
+      truncated: markdown.length < page.markdown.length,
+    });
+    used += header.length + markdown.length;
+  }
+  return { query, pages, pageCount: pages.length, characters: used, maxChars: budget };
+}
+
+export function getWikiFacets() {
+  const pages = loadPages();
+  return {
+    types: countValues(pages.map((page) => page.type)),
+    categories: countValuesNormalized(pages.flatMap((page) => page.frontmatter.categories || [])),
+    podcasts: countValues(pages.map(podcastFromPage).filter(Boolean)),
+    models: countValues(pages.map((page) => page.frontmatter.model).filter(Boolean)),
+  };
+}
+
+export function getWikiStatus() {
+  const manifestPath = path.join(WIKI_DIR, '.ingest-manifest.json');
+  const manifest = fs.existsSync(manifestPath) ? JSON.parse(readText(manifestPath)) : { sources: {} };
+  const sources = Object.values(manifest.sources || {});
+  return {
+    generatedPages: loadPages().length,
+    ingestedSources: sources.length,
+    extractionModes: countValues(sources.map((source) => source.extractionMode || 'unknown')),
+    schemaVersions: countValues(sources.map((source) => String(source.extractionSchemaVersion || 'unknown'))),
+    models: countValues(sources.map((source) => source.model || 'none')),
+    latestIngest: sources.map((source) => source.ingestedAt || source.ingested || null).filter(Boolean).sort().at(-1) || null,
+  };
 }
 
 export function readWikiPage(slug) {
@@ -91,7 +140,49 @@ function publicPage(page) {
     created: page.created || null,
     preview: page.content?.replace(/[#*`>\-\[\]]/g, '').replace(/\s+/g, ' ').trim().slice(0, 240) || '',
     provenance: page.provenance || provenanceFromFrontmatter(page.frontmatter || {}),
+    categories: Array.isArray(page.frontmatter?.categories) ? page.frontmatter.categories : [],
+    podcast: podcastFromPage(page),
   };
+}
+
+function matchesFilters(page, { type, category, podcast, from, to }) {
+  if (type && page.type !== type) return false;
+  if (category && !(page.frontmatter.categories || []).some((item) => normalize(item) === normalize(category))) return false;
+  if (podcast && normalize(podcastFromPage(page)).includes(normalize(podcast)) === false) return false;
+  const date = page.frontmatter.published || page.created;
+  if (from && (!date || String(date) < from)) return false;
+  if (to && (!date || String(date) > to)) return false;
+  return true;
+}
+
+function podcastFromPage(page) {
+  if (typeof page.frontmatter?.podcast === 'string') return page.frontmatter.podcast;
+  const sourceFile = page.frontmatter?.source_file;
+  const match = typeof sourceFile === 'string' ? sourceFile.match(/^media\/([^/]+)\//) : null;
+  return match?.[1] || null;
+}
+
+function countValues(values) {
+  const counts = {};
+  for (const value of values) {
+    const key = String(value).trim();
+    if (key) counts[key] = (counts[key] || 0) + 1;
+  }
+  return Object.fromEntries(Object.entries(counts).sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0])));
+}
+
+function countValuesNormalized(values) {
+  const entries = new Map();
+  for (const value of values) {
+    const display = String(value).trim();
+    const key = normalize(display);
+    if (!key) continue;
+    const current = entries.get(key);
+    entries.set(key, { display: current?.display || display, count: (current?.count || 0) + 1 });
+  }
+  return Object.fromEntries([...entries.values()]
+    .sort((left, right) => right.count - left.count || left.display.localeCompare(right.display))
+    .map(({ display, count }) => [display, count]));
 }
 
 function provenanceFromFrontmatter(data) {

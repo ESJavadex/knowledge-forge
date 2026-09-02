@@ -9,6 +9,8 @@ import { lintWiki } from './lint.js';
 import { startServer } from './server.js';
 import { queryWiki } from './query.js';
 import { updateTimeline } from './ingest-state.js';
+import { createOpenRouterGenerator } from './adapters/openrouter.js';
+import { createOpenClawGenerator } from './adapters/openclaw.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -143,8 +145,25 @@ switch (command) {
       console.error('Usage: node src/cli.js ingest <file-or-directory> [--force] | ingest --all');
       process.exit(1);
     }
+    const modelIndex = args.indexOf('--model');
+    const model = modelIndex >= 0 ? args[modelIndex + 1] : undefined;
+    if (modelIndex >= 0 && !model) {
+      console.error('Usage error: --model requires a model identifier.');
+      process.exit(1);
+    }
+    const providerIndex = args.indexOf('--provider');
+    const provider = providerIndex >= 0 ? args[providerIndex + 1] : 'openrouter';
+    if (!['openrouter', 'openclaw'].includes(provider)) {
+      console.error('Usage error: --provider must be openrouter or openclaw.');
+      process.exit(1);
+    }
+    const generator = provider === 'openclaw'
+      ? createOpenClawGenerator({ model })
+      : createOpenRouterGenerator({ model });
     const results = await ingestPath(path.resolve(requested), {
       force: args.includes('--force'),
+      requireSemantic: args.includes('--require-llm'),
+      generator,
       logger: console,
     });
     const skipped = results.filter((result) => result.skipped).length;
@@ -182,6 +201,8 @@ Usage:
   node src/cli.js demo        Create sample sources and ingest them
   node src/cli.js ingest PATH Ingest a file/directory; unchanged files are skipped
   node src/cli.js ingest --all Ingest every supported source under raw/
+  node src/cli.js ingest PATH --provider openclaw --model MODEL --require-llm
+                             Require grounded extraction with an exact configured model
   node src/cli.js query TEXT  Answer from the wiki with raw-source citations
   node src/cli.js lint        Health-check the wiki
   node src/cli.js serve       Start the web UI (localhost:3000)

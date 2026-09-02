@@ -1,6 +1,7 @@
 import path from 'path';
 import matter from 'gray-matter';
 import { createOpenRouterGenerator } from './adapters/openrouter.js';
+import { createOpenClawGenerator } from './adapters/openclaw.js';
 import {
   ANALYSIS_DIR,
   WIKI_DIR,
@@ -59,13 +60,13 @@ const SEARCH_STOP_WORDS = new Set([
 ]);
 
 export async function queryWiki(question, {
-  generator = createOpenRouterGenerator(),
+  generator = createDefaultQueryGenerator(),
   maxDocuments = 12,
 } = {}) {
   const cleanQuestion = typeof question === 'string' ? question.trim() : '';
   if (!cleanQuestion) throw new Error('A non-empty question is required.');
   if (!generator?.available) {
-    throw new Error('Natural-language queries require OPENROUTER_API_KEY.');
+    throw new Error('Natural-language queries require a configured LLM provider.');
   }
 
   const documents = retrieveWikiDocuments(cleanQuestion, maxDocuments);
@@ -87,6 +88,13 @@ export async function queryWiki(question, {
   const answer = validateGroundedAnswer(response, documents);
   const saved = saveAnalysis(cleanQuestion, answer, documents);
   return { ...answer, ...saved };
+}
+
+function createDefaultQueryGenerator() {
+  if (process.env.KNOWLEDGE_FORGE_PROVIDER === 'openclaw') {
+    return createOpenClawGenerator({ model: process.env.KNOWLEDGE_FORGE_MODEL || 'zai/glm-5.3-flash' });
+  }
+  return createOpenRouterGenerator();
 }
 
 export function retrieveWikiDocuments(question, maxDocuments = 12) {
