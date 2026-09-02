@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import matter from 'gray-matter';
 import { WIKI_DIR, extractWikiLinks, listMarkdownFiles, readText } from './utils.js';
+import { searchHybridIndex } from './hybrid-search.js';
 
 export function listWikiPages({ type, category, podcast, from, to, limit = 100 } = {}) {
   return loadPages()
@@ -23,12 +24,74 @@ export function searchWiki(query, { type, category, podcast, from, to, limit = 2
     .map((page) => ({ ...publicPage(page), score: page.score }));
 }
 
+export async function searchWikiHybrid(query, { type, category, podcast, from, to, limit = 20 } = {}) {
+  const requestedLimit = clampLimit(limit);
+  const hybridMatches = await searchHybridIndex(query, { limit: Math.min(requestedLimit * 3, 100) });
+  if (!hybridMatches) return searchWiki(query, { type, category, podcast, from, to, limit: requestedLimit });
+
+  const pagesBySlug = new Map(loadPages()
+    .filter((page) => page.slug !== 'index.md' && page.slug !== 'log.md')
+    .filter((page) => matchesFilters(page, { type, category, podcast, from, to }))
+    .map((page) => [page.slug, page]));
+  const results = [];
+  const seen = new Set();
+  for (const match of hybridMatches) {
+    const page = pagesBySlug.get(match.wikiPage);
+    if (!page || seen.has(page.slug)) continue;
+    results.push({ ...publicPage(page), score: match.score });
+    seen.add(page.slug);
+    if (results.length >= requestedLimit) return results;
+  }
+
+  for (const page of searchWiki(query, { type, category, podcast, from, to, limit: requestedLimit * 2 })) {
+    if (seen.has(page.slug)) continue;
+    results.push(page);
+    seen.add(page.slug);
+    if (results.length >= requestedLimit) break;
+  }
+  return results;
+}
+
 export function getWikiContext(query, { maxChars = 24_000, limit = 8, ...filters } = {}) {
   const budget = Math.min(Math.max(Number.parseInt(maxChars, 10) || 24_000, 1_000), 80_000);
   const requestedLimit = Math.min(clampLimit(limit), 20);
   const matches = searchWiki(query, { ...filters, limit: Math.min(requestedLimit * 3, 200) })
     .filter((page) => filters.type || page.type !== 'analysis')
     .slice(0, requestedLimit);
+  const pages = [];
+  let used = 0;
+  const perPageBudget = matches.length > 0 ? Math.floor(budget / matches.length) : budget;
+  for (const match of matches) {
+    const page = readWikiPage(match.slug);
+    const header = `# ${page.title}\nWiki page: ${page.slug}\nRaw sources: ${page.provenance.rawSources.join(', ') || 'none'}\n\n`;
+    const remaining = Math.min(budget - used - header.length, Math.max(500, perPageBudget - header.length));
+    if (remaining <= 0) break;
+    const markdown = page.markdown.slice(0, remaining);
+    pages.push({
+      slug: page.slug,
+      title: page.title,
+      type: page.type,
+      score: match.score,
+      provenance: page.provenance,
+      markdown,
+      truncated: markdown.length < page.markdown.length,
+    });
+    used += header.length + markdown.length;
+  }
+  return { query, pages, pageCount: pages.length, characters: used, maxChars: budget };
+}
+
+export async function getWikiContextHybrid(query, { maxChars = 24_000, limit = 8, ...filters } = {}) {
+  const budget = Math.min(Math.max(Number.parseInt(maxChars, 10) || 24_000, 1_000), 80_000);
+  const requestedLimit = Math.min(clampLimit(limit), 20);
+  const matches = (await searchWikiHybrid(query, {
+    ...filters,
+    limit: Math.min(requestedLimit * 3, 200),
+  })).filter((page) => filters.type || page.type !== 'analysis').slice(0, requestedLimit);
+  return buildContext(query, matches, budget);
+}
+
+function buildContext(query, matches, budget) {
   const pages = [];
   let used = 0;
   const perPageBudget = matches.length > 0 ? Math.floor(budget / matches.length) : budget;
