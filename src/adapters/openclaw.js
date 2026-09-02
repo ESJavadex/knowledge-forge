@@ -62,10 +62,25 @@ export class OpenClawJsonGenerator {
       }
     }
     const content = envelope?.outputs?.[0]?.text;
-    const value = parseJsonDefensively(content);
+    const value = normalizeForSchema(parseJsonDefensively(content), schema);
     validateSchema(value, schema, '$');
     return value;
   }
+}
+
+function normalizeForSchema(value, schema) {
+  if (!schema || typeof schema !== 'object') return value;
+  if (schema.type === 'object' && value && typeof value === 'object' && !Array.isArray(value)) {
+    return Object.fromEntries(Object.entries(schema.properties || {})
+      .filter(([key]) => key in value)
+      .map(([key, childSchema]) => [key, normalizeForSchema(value[key], childSchema)]));
+  }
+  if (schema.type === 'array' && Array.isArray(value)) {
+    const items = schema.maxItems ? value.slice(0, schema.maxItems) : value;
+    return items.map((item) => normalizeForSchema(item, schema.items));
+  }
+  if (schema.type === 'string' && (typeof value === 'number' || typeof value === 'boolean')) return String(value);
+  return value;
 }
 
 function validateSchema(value, schema, path) {
@@ -85,7 +100,6 @@ function validateSchema(value, schema, path) {
     }
   } else if (schema.type === 'array') {
     if (!Array.isArray(value)) throw new Error(`${path} must be an array.`);
-    if (schema.maxItems && value.length > schema.maxItems) throw new Error(`${path} exceeds maxItems=${schema.maxItems}.`);
     value.forEach((item, index) => validateSchema(item, schema.items, `${path}[${index}]`));
   } else if (schema.type === 'string' && typeof value !== 'string') {
     throw new Error(`${path} must be a string.`);

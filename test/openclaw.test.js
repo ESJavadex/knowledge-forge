@@ -53,3 +53,21 @@ test('OpenClaw adapter rejects a different effective model', async () => {
     /expected exact model/,
   );
 });
+
+test('OpenClaw adapter deterministically normalizes harmless schema overflow', async () => {
+  const generator = new OpenClawJsonGenerator({
+    model: 'zai/glm-5.3-flash',
+    runImpl: async () => ({ stdout: JSON.stringify({
+      provider: 'zai', model: 'glm-5.3-flash',
+      outputs: [{ text: '{"dates":[2026,2025],"extra":"ignored"}' }],
+    }) }),
+  });
+  const result = await generator.generateJson({
+    system: '', prompt: '', schemaName: 'x',
+    schema: {
+      type: 'object', additionalProperties: false, required: ['dates'],
+      properties: { dates: { type: 'array', maxItems: 1, items: { type: 'string' } } },
+    },
+  });
+  assert.deepEqual(result, { dates: ['2026'] });
+});
