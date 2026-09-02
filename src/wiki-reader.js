@@ -23,7 +23,10 @@ export function searchWiki(query, { type, category, podcast, from, to, limit = 2
 
 export function getWikiContext(query, { maxChars = 24_000, limit = 8, ...filters } = {}) {
   const budget = Math.min(Math.max(Number.parseInt(maxChars, 10) || 24_000, 1_000), 80_000);
-  const matches = searchWiki(query, { ...filters, limit: Math.min(clampLimit(limit), 20) });
+  const requestedLimit = Math.min(clampLimit(limit), 20);
+  const matches = searchWiki(query, { ...filters, limit: Math.min(requestedLimit * 3, 200) })
+    .filter((page) => filters.type || page.type !== 'analysis')
+    .slice(0, requestedLimit);
   const pages = [];
   let used = 0;
   for (const match of matches) {

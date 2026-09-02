@@ -19,7 +19,7 @@ import { readEvidenceForSourceSlug } from './ingest-state.js';
 const QUERY_SCHEMA = {
   type: 'object',
   additionalProperties: false,
-  required: ['found', 'claims', 'not_found_reason'],
+  required: ['found', 'claims'],
   properties: {
     found: { type: 'boolean' },
     claims: {
@@ -62,6 +62,7 @@ const SEARCH_STOP_WORDS = new Set([
 export async function queryWiki(question, {
   generator = createDefaultQueryGenerator(),
   maxDocuments = 12,
+  maxContextBytes = 80_000,
 } = {}) {
   const cleanQuestion = typeof question === 'string' ? question.trim() : '';
   if (!cleanQuestion) throw new Error('A non-empty question is required.');
@@ -69,7 +70,7 @@ export async function queryWiki(question, {
     throw new Error('Natural-language queries require a configured LLM provider.');
   }
 
-  const documents = retrieveWikiDocuments(cleanQuestion, maxDocuments);
+  const documents = retrieveWikiDocuments(cleanQuestion, maxDocuments, maxContextBytes);
   const response = documents.length === 0
     ? { found: false, claims: [], not_found_reason: 'No relevant wiki pages were found.' }
     : await generator.generateJson({
@@ -97,16 +98,33 @@ function createDefaultQueryGenerator() {
   return createOpenRouterGenerator();
 }
 
-export function retrieveWikiDocuments(question, maxDocuments = 12) {
+export function retrieveWikiDocuments(question, maxDocuments = 12, maxContextBytes = 80_000) {
   const pages = loadCitablePages();
   const terms = tokenize(question);
 
-  return pages
+  const ranked = pages
     .map((page) => ({ ...page, score: relevanceScore(page, terms) }))
     .filter((page) => page.score > 0 && page.rawSources.length > 0)
     .sort((left, right) => right.score - left.score || left.wikiPage.localeCompare(right.wikiPage))
     .slice(0, maxDocuments)
-    .map(({ score, ...page }) => ({ ...page, evidence: selectEvidence(page.evidence, terms) }));
+    .map(({ score, ...page }) => ({
+      ...page,
+      content: page.content.slice(0, 3_500),
+      evidence: selectEvidence(page.evidence, terms, 5, 1_400),
+    }));
+
+  return fitDocumentsToByteBudget(ranked, maxContextBytes);
+}
+
+export function fitDocumentsToByteBudget(documents, maxBytes = 80_000) {
+  const budget = Math.max(8_000, Number.parseInt(maxBytes, 10) || 80_000);
+  const selected = [];
+  for (const document of documents) {
+    const candidate = [...selected, document];
+    if (Buffer.byteLength(JSON.stringify(candidate), 'utf8') > budget) break;
+    selected.push(document);
+  }
+  return selected;
 }
 
 export function validateGroundedAnswer(value, documents) {
@@ -149,7 +167,7 @@ export function validateGroundedAnswer(value, documents) {
 function loadCitablePages() {
   const files = listMarkdownFiles(WIKI_DIR).filter((file) => {
     const relative = path.relative(WIKI_DIR, file);
-    return relative !== 'index.md' && relative !== 'log.md';
+    return relative !== 'index.md' && relative !== 'log.md' && !relative.startsWith(`analyses${path.sep}`);
   });
 
   const parsed = files.map((file) => {
@@ -235,7 +253,10 @@ function relevanceScore(page, terms) {
     }
     score += matches;
   }
-  if (score > 0 && page.type === 'source') score += 1;
+  // Prefer the episode/source page over broad aggregate concepts when both
+  // contain the query terms. This keeps answers anchored to the most specific
+  // document and avoids generic pages dominating through repeated backlinks.
+  if (score > 0 && page.type === 'source') score += 10;
   return score;
 }
 
@@ -308,11 +329,11 @@ function arrayValue(value) {
   return [];
 }
 
-function selectEvidence(evidence, terms, limit = 12) {
+function selectEvidence(evidence, terms, limit = 12, maxLength = 2_000) {
   return evidence.map((item) => {
     const normalized = normalize(item.text);
     const score = terms.reduce((total, term) => total + (normalized.includes(term) ? 1 : 0), 0);
-    return { ...item, score, text: evidenceExcerpt(item.text, terms) };
+    return { ...item, score, text: evidenceExcerpt(item.text, terms, maxLength) };
   }).sort((left, right) => right.score - left.score)
     .slice(0, limit)
     .map(({ score, ...item }) => item);
