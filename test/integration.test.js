@@ -38,8 +38,14 @@ for (const extension of ['md', 'pdf', 'docx']) {
     const result = schemaName === 'knowledge_extraction'
       ? {
           summary: 'El 3 de marzo de 2026 se recetó Pomada X para una fisura anal.',
+          categories: ['Salud'],
           concepts: ['Fisura anal', 'Tratamiento'],
           entities: ['Pomada X'],
+          key_points: ['Pomada X fue el tratamiento indicado.'],
+          conclusions: ['La indicación registrada fue un tratamiento tópico.'],
+          recommendations: ['Seguir la prescripción registrada.'],
+          notable_quotes: [{ quote: 'se recetó Pomada X', context: 'Indicación terapéutica' }],
+          open_questions: ['No consta la duración del tratamiento.'],
           relevant_dates: [{ date: '2026-03-03', description: 'Prescripción de Pomada X' }],
         }
       : {
@@ -70,6 +76,8 @@ for (const extension of ['md', 'pdf', 'docx']) {
   };
 
   await runCli(['ingest', sourcePath], fixtureRoot, env);
+  // Reprocessing must update already-created concept/entity pages safely.
+  await runCli(['ingest', sourcePath, '--force'], fixtureRoot, env);
   const repeatedIngest = await runCli(['ingest', path.join(fixtureRoot, 'raw')], fixtureRoot, env);
   assert.match(repeatedIngest, /skipped 1 unchanged source/);
   const queryOutput = await runCli(['query', '¿qué me recetaron para la fisura y en qué fecha?'], fixtureRoot, env);
@@ -79,19 +87,28 @@ for (const extension of ['md', 'pdf', 'docx']) {
   assert.match(queryOutput, new RegExp(`raw/informe-medico\\.${extension}`));
   assert.deepEqual(fs.readFileSync(sourcePath), sourceBefore);
 
+  const sourcePage = fs.readFileSync(path.join(fixtureRoot, 'wiki', 'sources', 'informe-medico.md'), 'utf8');
+  assert.match(sourcePage, /## Categories[\s\S]*\[\[Salud\]\]/);
+  assert.match(sourcePage, /## Key Points[\s\S]*Pomada X fue el tratamiento indicado/);
+  assert.match(sourcePage, /## Conclusions[\s\S]*tratamiento tópico/);
+  assert.match(sourcePage, /## Recommendations From the Source/);
+  assert.match(sourcePage, /## Notable Quotes[\s\S]*se recetó Pomada X/);
+  assert.match(sourcePage, /model: "anthropic\/test-model"/);
+
   const analyses = fs.readdirSync(path.join(fixtureRoot, 'wiki', 'analyses'));
   assert.equal(analyses.length, 1);
   const analysis = fs.readFileSync(path.join(fixtureRoot, 'wiki', 'analyses', analyses[0]), 'utf8');
-  assert.match(analysis, /\[\[Informe Medico\]\]/);
+  assert.match(analysis, new RegExp(`\\[\\[Informe ${extension === 'md' ? 'médico' : 'Medico'}\\]\\]`));
   assert.match(analysis, new RegExp(`raw/informe-medico\\.${extension}`));
   assert.match(analysis, new RegExp(evidence.locator.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   assert.match(analysis, /Pomada X/);
 
   const manifest = JSON.parse(fs.readFileSync(path.join(fixtureRoot, 'wiki', '.ingest-manifest.json'), 'utf8'));
   assert.equal(Object.keys(manifest.sources).length, 1);
+  assert.equal(Object.values(manifest.sources)[0].extractionSchemaVersion, 4);
   const timeline = fs.readFileSync(path.join(fixtureRoot, 'wiki', 'timeline.md'), 'utf8');
   assert.match(timeline, /2026-03-03/);
-  assert.match(timeline, /\[\[Informe Medico\]\]/);
+  assert.match(timeline, new RegExp(`\\[\\[Informe ${extension === 'md' ? 'médico' : 'Medico'}\\]\\]`));
   });
 }
 

@@ -8,8 +8,14 @@ test('semantic extraction normalizes structured output and preserves relevant da
     async generateJson() {
       return {
         summary: 'El 3 de marzo se recetó pomada para la fisura.',
+        categories: ['Salud'],
         concepts: ['Fisura anal', 'Tratamiento'],
         entities: ['Pomada X', 'Pomada X'],
+        key_points: ['La pomada se recetó para la fisura.'],
+        conclusions: ['El tratamiento indicado fue tópico.'],
+        recommendations: ['Usar la pomada prescrita.'],
+        notable_quotes: [{ quote: 'se recetó Pomada X', context: 'Tratamiento' }],
+        open_questions: ['No se especifica la duración.'],
         relevant_dates: [{ date: '2026-03-03', description: 'Prescripción' }],
       };
     },
@@ -22,6 +28,9 @@ test('semantic extraction normalizes structured output and preserves relevant da
   });
 
   assert.equal(result.mode, 'llm');
+  assert.deepEqual(result.categories, ['Salud']);
+  assert.deepEqual(result.conclusions, ['El tratamiento indicado fue tópico.']);
+  assert.deepEqual(result.notableQuotes, [{ quote: 'se recetó Pomada X', context: 'Tratamiento' }]);
   assert.deepEqual(result.entities, [{ name: 'Pomada X', count: 1 }]);
   assert.deepEqual(result.relevantDates, [{ date: '2026-03-03', description: 'Prescripción' }]);
 });

@@ -20,11 +20,40 @@ const STOP_WORDS = new Set([
 const EXTRACTION_SCHEMA = {
   type: 'object',
   additionalProperties: false,
-  required: ['summary', 'concepts', 'entities', 'relevant_dates'],
+  required: [
+    'summary',
+    'categories',
+    'concepts',
+    'entities',
+    'key_points',
+    'conclusions',
+    'recommendations',
+    'notable_quotes',
+    'open_questions',
+    'relevant_dates',
+  ],
   properties: {
     summary: { type: 'string' },
-    concepts: { type: 'array', items: { type: 'string' }, maxItems: 15 },
-    entities: { type: 'array', items: { type: 'string' }, maxItems: 15 },
+    categories: { type: 'array', items: { type: 'string' }, maxItems: 8 },
+    concepts: { type: 'array', items: { type: 'string' }, maxItems: 20 },
+    entities: { type: 'array', items: { type: 'string' }, maxItems: 20 },
+    key_points: { type: 'array', items: { type: 'string' }, maxItems: 20 },
+    conclusions: { type: 'array', items: { type: 'string' }, maxItems: 10 },
+    recommendations: { type: 'array', items: { type: 'string' }, maxItems: 12 },
+    notable_quotes: {
+      type: 'array',
+      maxItems: 10,
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['quote', 'context'],
+        properties: {
+          quote: { type: 'string' },
+          context: { type: 'string' },
+        },
+      },
+    },
+    open_questions: { type: 'array', items: { type: 'string' }, maxItems: 10 },
     relevant_dates: {
       type: 'array',
       maxItems: 15,
@@ -67,15 +96,30 @@ export function heuristicExtract(text) {
 
   return {
     summary: paragraphs[0]?.replace(/^#+\s/gm, '').slice(0, 500) || 'No summary available.',
+    categories: [],
     concepts: candidates.filter(({ name }) => !name.includes(' ') && !entityIndicators.some((term) => name.includes(term))),
     entities: candidates.filter(({ name }) => name.includes(' ') || entityIndicators.some((term) => name.includes(term))),
+    keyPoints: [],
+    conclusions: [],
+    recommendations: [],
+    notableQuotes: [],
+    openQuestions: [],
     relevantDates: [],
     mode: 'heuristic',
   };
 }
 
-export async function extractSemantics({ text, fileName, generator, logger = console }) {
-  if (!generator?.available) return heuristicExtract(text);
+export async function extractSemantics({
+  text,
+  fileName,
+  generator,
+  logger = console,
+  requireSemantic = process.env.LLM_REQUIRE_SEMANTIC === 'true',
+}) {
+  if (!generator?.available) {
+    if (requireSemantic) throw new Error('Semantic extraction is required but no LLM provider is configured.');
+    return heuristicExtract(text);
+  }
 
   const maxChars = positiveInteger(process.env.LLM_CHUNK_CHARS, 60_000);
   const chunks = splitTextIntoChunks(text, maxChars);
@@ -91,6 +135,10 @@ export async function extractSemantics({ text, fileName, generator, logger = con
           'You extract grounded knowledge from personal documents for a private wiki.',
           'Return only facts explicitly present in the source. Never infer diagnoses, treatments, dates, identities, or missing details.',
           'Write the summary in the source language. Include important relationships between treatments/events and their dates in the summary.',
+          'Categories are broad, reusable taxonomy labels; concepts are specific recurring ideas.',
+          'Key points are atomic, source-grounded claims. Conclusions must reflect conclusions stated or directly supported by the source.',
+          'Recommendations must be advice actually given in the source, phrased as attributed source content rather than universal medical advice.',
+          'Notable quotes must be short, exact verbatim excerpts. Open questions capture explicit uncertainty or unresolved issues.',
           'Normalize complete relevant dates as YYYY-MM-DD when the source makes the date unambiguous; preserve partial or uncertain dates explicitly.',
           'Concepts are recurring topics. Entities are named people, organizations, medications, products, places, tests, or conditions.',
           'Keep names faithful to the source and make each item concise and unique.',
@@ -99,6 +147,9 @@ export async function extractSemantics({ text, fileName, generator, logger = con
       });
       extractions.push(normalizeExtraction(raw, chunk));
     } catch (error) {
+      if (requireSemantic) {
+        throw new Error(`Semantic extraction failed for part ${index + 1}/${chunks.length}: ${error.message}`);
+      }
       logger.warn(`  ⚠️  Semantic extraction failed for part ${index + 1}/${chunks.length} (${error.message}); using heuristic fallback for that part.`);
       extractions.push(heuristicExtract(chunk));
     }
@@ -138,6 +189,12 @@ function mergeExtractions(extractions, sourceText) {
   const summaries = [...new Set(extractions.map((item) => item.summary).filter(Boolean))];
   const concepts = mergeNames(extractions.flatMap((item) => item.concepts), sourceText);
   const entities = mergeNames(extractions.flatMap((item) => item.entities), sourceText);
+  const categories = mergeStrings(extractions.flatMap((item) => item.categories), 12);
+  const keyPoints = mergeStrings(extractions.flatMap((item) => item.keyPoints), 30);
+  const conclusions = mergeStrings(extractions.flatMap((item) => item.conclusions), 15);
+  const recommendations = mergeStrings(extractions.flatMap((item) => item.recommendations), 20);
+  const openQuestions = mergeStrings(extractions.flatMap((item) => item.openQuestions), 15);
+  const notableQuotes = mergeQuotes(extractions.flatMap((item) => item.notableQuotes), 15);
   const dates = new Map();
   for (const item of extractions.flatMap((extraction) => extraction.relevantDates)) {
     const key = `${item.date.toLocaleLowerCase()}\u0000${item.description.toLocaleLowerCase()}`;
@@ -146,8 +203,14 @@ function mergeExtractions(extractions, sourceText) {
   const modes = new Set(extractions.map((item) => item.mode));
   return {
     summary: summaries.join(' ').slice(0, 2_000) || 'No summary available.',
+    categories,
     concepts,
     entities,
+    keyPoints,
+    conclusions,
+    recommendations,
+    notableQuotes,
+    openQuestions,
     relevantDates: [...dates.values()].slice(0, 30),
     mode: modes.size === 1 ? [...modes][0] : 'hybrid',
   };
@@ -172,11 +235,57 @@ function normalizeExtraction(value, sourceText) {
 
   return {
     summary,
+    categories: normalizeStrings(value.categories, 8, 100),
     concepts: normalizeNames(value.concepts, sourceText),
     entities: normalizeNames(value.entities, sourceText),
+    keyPoints: normalizeStrings(value.key_points ?? value.keyPoints, 20, 500),
+    conclusions: normalizeStrings(value.conclusions, 10, 500),
+    recommendations: normalizeStrings(value.recommendations, 12, 500),
+    notableQuotes: normalizeQuotes(value.notable_quotes ?? value.notableQuotes),
+    openQuestions: normalizeStrings(value.open_questions ?? value.openQuestions, 10, 500),
     relevantDates: normalizeDates(value.relevant_dates ?? value.relevantDates),
     mode: 'llm',
   };
+}
+
+function normalizeStrings(items, maxItems, maxLength) {
+  if (!Array.isArray(items)) return [];
+  const seen = new Set();
+  const normalized = [];
+  for (const item of items) {
+    const value = cleanString(item, maxLength);
+    const key = value.toLocaleLowerCase();
+    if (!value || seen.has(key)) continue;
+    seen.add(key);
+    normalized.push(value);
+    if (normalized.length === maxItems) break;
+  }
+  return normalized;
+}
+
+function normalizeQuotes(items) {
+  if (!Array.isArray(items)) return [];
+  const seen = new Set();
+  const normalized = [];
+  for (const item of items) {
+    const quote = cleanString(typeof item === 'string' ? item : item?.quote, 500);
+    const context = cleanString(typeof item === 'object' ? item?.context : '', 300);
+    const key = quote.toLocaleLowerCase();
+    if (!quote || seen.has(key)) continue;
+    seen.add(key);
+    normalized.push({ quote, context });
+    if (normalized.length === 10) break;
+  }
+  return normalized;
+}
+
+function mergeStrings(items, maxItems) {
+  return normalizeStrings(items, maxItems, 500);
+}
+
+function mergeQuotes(items, maxItems) {
+  const merged = normalizeQuotes(items);
+  return merged.slice(0, maxItems);
 }
 
 function normalizeNames(items, sourceText) {
