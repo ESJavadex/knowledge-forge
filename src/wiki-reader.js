@@ -13,7 +13,9 @@ export function listWikiPages({ type, category, podcast, from, to, limit = 100 }
 export function searchWiki(query, { type, category, podcast, from, to, limit = 20 } = {}) {
   const terms = tokenize(query);
   if (terms.length === 0) return [];
-  return loadPages().filter((page) => matchesFilters(page, { type, category, podcast, from, to }))
+  return loadPages()
+    .filter((page) => page.slug !== 'index.md' && page.slug !== 'log.md')
+    .filter((page) => matchesFilters(page, { type, category, podcast, from, to }))
     .map((page) => ({ ...page, score: scorePage(page, terms) }))
     .filter((page) => page.score > 0)
     .sort((left, right) => right.score - left.score || left.slug.localeCompare(right.slug))
@@ -29,10 +31,11 @@ export function getWikiContext(query, { maxChars = 24_000, limit = 8, ...filters
     .slice(0, requestedLimit);
   const pages = [];
   let used = 0;
+  const perPageBudget = matches.length > 0 ? Math.floor(budget / matches.length) : budget;
   for (const match of matches) {
     const page = readWikiPage(match.slug);
     const header = `# ${page.title}\nWiki page: ${page.slug}\nRaw sources: ${page.provenance.rawSources.join(', ') || 'none'}\n\n`;
-    const remaining = budget - used - header.length;
+    const remaining = Math.min(budget - used - header.length, Math.max(500, perPageBudget - header.length));
     if (remaining <= 0) break;
     const markdown = page.markdown.slice(0, remaining);
     pages.push({

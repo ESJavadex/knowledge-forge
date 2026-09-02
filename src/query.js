@@ -148,7 +148,8 @@ export function validateGroundedAnswer(value, documents) {
           item.rawSource === rawSource && item.locator === locator && quoteSupported(item.text, quote),
         );
         const key = `${wikiPage}\u0000${rawSource}\u0000${locator}\u0000${quote}`;
-        if (!document || !document.rawSources.includes(rawSource) || !evidence || seen.has(key)) continue;
+        if (!document || !document.rawSources.includes(rawSource) || !evidence ||
+          !claimSupportedByCitation(text, quote, document.title) || seen.has(key)) continue;
         seen.add(key);
         citations.push({ wikiPage, rawSource, wikiTitle: document.title, locator, quote });
       }
@@ -351,6 +352,26 @@ function evidenceExcerpt(text, terms, maxLength = 2_000) {
 function quoteSupported(text, quote) {
   if (!quote) return false;
   return normalizeWhitespace(text).includes(normalizeWhitespace(quote));
+}
+
+function claimSupportedByCitation(claim, quote, sourceTitle) {
+  const quoteTokens = new Set(groundingTokens(quote));
+  const titleTokens = new Set(groundingTokens(sourceTitle));
+  const claimTokens = groundingTokens(claim).filter((token) => !titleTokens.has(token));
+  if (claimTokens.length === 0) return false;
+
+  const lastToken = normalize(quote).trim().split(/[^a-z0-9]+/).filter(Boolean).at(-1);
+  if (new Set(['a', 'al', 'con', 'de', 'del', 'el', 'en', 'la', 'las', 'los', 'para', 'por', 'un', 'una', 'y']).has(lastToken)) {
+    return false;
+  }
+
+  const matched = claimTokens.filter((token) => quoteTokens.has(token)).length;
+  return matched >= Math.min(3, claimTokens.length) && matched / claimTokens.length >= 0.55;
+}
+
+function groundingTokens(value) {
+  return [...new Set(normalize(value).split(/[^a-z0-9]+/)
+    .filter((term) => term.length >= 4 && !SEARCH_STOP_WORDS.has(term)))];
 }
 
 function normalizeWhitespace(value) {
