@@ -375,6 +375,19 @@
         return matchType && matchSearch;
       });
 
+      const typeOrder = { analysis: 0, source: 1, concept: 2, entity: 3 };
+      filtered.sort((left, right) => {
+        const typeDifference = (typeOrder[left.type] ?? 9) - (typeOrder[right.type] ?? 9);
+        if (typeDifference !== 0) return typeDifference;
+
+        if (left.type === 'analysis' || left.type === 'source') {
+          const newestFirst = (Date.parse(right.created || '') || 0) - (Date.parse(left.created || '') || 0);
+          if (newestFirst !== 0) return newestFirst;
+        }
+
+        return left.title.localeCompare(right.title, 'es', { sensitivity: 'base' });
+      });
+
       document.getElementById('page-list').innerHTML = filtered.map(p => `
         <div class="page-item ${p.slug === currentSlug ? 'active' : ''}" data-slug="${p.slug}">
           <div class="page-item-title">
