@@ -350,6 +350,9 @@
       const page = await res.json();
       renderPage(page);
       highlightActive(slug);
+      const url = new URL(window.location.href);
+      url.searchParams.set('page', slug);
+      history.replaceState({}, '', url);
     }
 
     function renderStats() {
@@ -482,7 +485,12 @@
 
     // Init
     loadPages();
-    renderWelcome();
+    const requestedPage = new URLSearchParams(window.location.search).get('page');
+    if (requestedPage) {
+      loadPage(requestedPage);
+    } else {
+      renderWelcome();
+    }
   </script>
 </body>
 </html>
