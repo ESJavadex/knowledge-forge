@@ -386,5 +386,5 @@ MIT — use it, fork it, build on top of it.
 ---
 
 <p align="center">
-  Built with ☕ by <a href="https://javadex.es">Javier Santos</a> · Inspired by <a href="https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f">Andrej Karpathy</a>
+  Built with ☕ by <a href="https://www.javadex.es/">Javier Santos</a> · <a href="https://www.javadex.es/blog/llm-wiki-empresas-supercerebro-corporativo-knowledge-forge-2026">The business version of this pattern</a> · Inspired by <a href="https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f">Andrej Karpathy</a>
 </p>
