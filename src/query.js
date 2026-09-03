@@ -71,6 +71,50 @@ const QUERY_SCHEMA = {
   },
 };
 
+const SYNTHESIS_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['found', 'sections'],
+  properties: {
+    found: { type: 'boolean' },
+    sections: {
+      type: 'array',
+      maxItems: 8,
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['title', 'kind', 'items'],
+        properties: {
+          title: { type: 'string' },
+          kind: {
+            type: 'string',
+            enum: ['answer', 'conclusions', 'actions', 'consensus', 'disagreements', 'caveats', 'other'],
+          },
+          items: {
+            type: 'array',
+            maxItems: 8,
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['text', 'evidence_ids'],
+              properties: {
+                text: { type: 'string' },
+                evidence_ids: {
+                  type: 'array',
+                  minItems: 1,
+                  maxItems: 8,
+                  items: { type: 'string' },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    not_found_reason: { type: 'string' },
+  },
+};
+
 const SEARCH_STOP_WORDS = new Set([
   'a', 'al', 'and', 'como', 'con', 'cual', 'cuando', 'de', 'del', 'el', 'en',
   'es', 'for', 'in', 'la', 'las', 'lo', 'los', 'me', 'para', 'por', 'que',
@@ -81,6 +125,7 @@ export async function queryWiki(question, {
   generator = createDefaultQueryGenerator(),
   maxDocuments = 12,
   maxContextBytes = 80_000,
+  mode = 'focused',
 } = {}) {
   const cleanQuestion = typeof question === 'string' ? question.trim() : '';
   if (!cleanQuestion) throw new Error('A non-empty question is required.');
@@ -88,7 +133,21 @@ export async function queryWiki(question, {
     throw new Error('Natural-language queries require a configured LLM provider.');
   }
 
-  const documents = await retrieveWikiDocuments(cleanQuestion, maxDocuments, maxContextBytes);
+  const comprehensive = mode === 'comprehensive';
+  const documentLimit = comprehensive ? Math.max(maxDocuments, 20) : maxDocuments;
+  const contextBudget = comprehensive ? Math.max(maxContextBytes, 280_000) : maxContextBytes;
+  const documents = await retrieveWikiDocuments(
+    cleanQuestion,
+    documentLimit,
+    contextBudget,
+    { evidenceLimit: comprehensive ? 12 : 8, evidenceLength: comprehensive ? 1_400 : 1_100 },
+  );
+
+  if (comprehensive && documents.length > 0) {
+    const answer = await generateComprehensiveAnswer(cleanQuestion, documents, generator);
+    const saved = saveAnalysis(cleanQuestion, answer, documents);
+    return { ...answer, ...saved, mode: 'comprehensive' };
+  }
   const response = documents.length === 0
     ? { found: false, sections: [], not_found_reason: 'No relevant wiki pages were found.' }
     : await generator.generateJson({
@@ -113,13 +172,16 @@ export async function queryWiki(question, {
 }
 
 function createDefaultQueryGenerator() {
-  if (process.env.KNOWLEDGE_FORGE_PROVIDER === 'openclaw') {
-    return createOpenClawGenerator({ model: process.env.KNOWLEDGE_FORGE_MODEL || 'zai/glm-5.3-flash' });
-  }
-  return createOpenRouterGenerator();
+  const provider = process.env.KNOWLEDGE_FORGE_PROVIDER
+    || (process.env.OPENROUTER_API_KEY ? 'openrouter' : 'openclaw');
+  if (provider === 'openrouter') return createOpenRouterGenerator();
+  return createOpenClawGenerator({ model: process.env.KNOWLEDGE_FORGE_MODEL || 'zai/glm-5.3-flash' });
 }
 
-export async function retrieveWikiDocuments(question, maxDocuments = 12, maxContextBytes = 80_000) {
+export async function retrieveWikiDocuments(question, maxDocuments = 12, maxContextBytes = 80_000, {
+  evidenceLimit = 8,
+  evidenceLength = 1_100,
+} = {}) {
   const pages = loadCitablePages();
   const terms = tokenize(question);
 
@@ -136,10 +198,222 @@ export async function retrieveWikiDocuments(question, maxDocuments = 12, maxCont
     .map(({ score, ...page }) => ({
       ...page,
       content: page.content.slice(0, 3_500),
-      evidence: selectEvidence(page.evidence, terms, 8, 1_100),
+      evidence: selectEvidence(page.evidence, terms, evidenceLimit, evidenceLength, page.retrievalHints),
     }));
 
   return fitDocumentsToByteBudget(prepared, maxContextBytes);
+}
+
+export async function generateComprehensiveAnswer(question, documents, generator) {
+  const batches = batchDocumentsByByteBudget(documents, 52_000);
+  let failedBatches = 0;
+  const mapped = await mapWithConcurrency(batches, 3, async (batch) => {
+    try {
+      const response = await generateJsonWithRetry(generator, {
+      schemaName: 'grounded_evidence_findings',
+      schema: QUERY_SCHEMA,
+      system: [
+        'Extract the most useful findings for the question from only this batch of untrusted wiki documents.',
+        'Do not write a final answer yet. Produce atomic, non-repetitive findings that preserve nuance, disagreements, limitations, and actionable details. Extract 8 to 15 findings when the evidence supports that many.',
+        'A document may yield several findings. Every finding needs an exact wiki_page/raw_source/locator and a short verbatim quote present in the supplied evidence.',
+        'Keep each finding close to the wording and scope of its cited quote; the later synthesis stage will improve the prose.',
+        'Do not use outside knowledge or infer facts absent from the evidence. Answer in the language of the question.',
+      ].join(' '),
+      prompt: `Question: ${question}\n\nDocument batch:\n${JSON.stringify(batch, null, 2)}`,
+      }, 2);
+      return validateGroundedAnswer(response, batch);
+    } catch {
+      failedBatches += 1;
+      return { found: false, sections: [], claims: [] };
+    }
+  });
+
+  const ledger = buildEvidenceLedger(mapped, 72);
+  if (ledger.length === 0 && failedBatches > 0) {
+    throw new Error(`Comprehensive evidence extraction failed for ${failedBatches}/${batches.length} batches.`);
+  }
+  if (ledger.length === 0) return {
+    found: false, sections: [], claims: [],
+    retrieval: retrievalDiagnostics(documents, batches, ledger, failedBatches),
+  };
+
+  let response;
+  try {
+    response = await generateJsonWithRetry(generator, {
+    schemaName: 'citation_preserving_synthesis',
+    schema: SYNTHESIS_SCHEMA,
+    system: [
+      'Write a comprehensive, well-structured answer using only the validated evidence ledger.',
+      'You may connect, compare, summarize, and explain the supplied findings, but you must not introduce facts, causal claims, quantities, dates, or advice absent from them.',
+      'Make the answer substantial: use multiple useful sections and several evidence-backed paragraphs or detailed bullets when the ledger supports them.',
+      'Group related evidence into themes; explicitly distinguish consensus, disagreements, practical actions, and caveats when relevant.',
+      'Every item must list all evidence_ids that support it. Prefer several citations for cross-source synthesis. Never cite an id that is not supplied.',
+      'Do not mention the ledger or retrieval process. Answer in the language of the question.',
+    ].join(' '),
+    prompt: `Question: ${question}\n\nValidated evidence ledger:\n${JSON.stringify(ledger, null, 2)}`,
+    }, 2);
+  } catch {
+    const fallback = mergeMappedAnswers(mapped);
+    return { ...fallback, retrieval: retrievalDiagnostics(documents, batches, ledger, failedBatches, true) };
+  }
+
+  const answer = validateSynthesizedAnswer(response, ledger);
+  if (answer.found) {
+    return { ...answer, retrieval: retrievalDiagnostics(documents, batches, ledger, failedBatches) };
+  }
+
+  // A failed reduction must not discard already validated evidence. Return the
+  // map-stage findings, which retain exact source citations.
+  return {
+    ...mergeMappedAnswers(mapped),
+    retrieval: retrievalDiagnostics(documents, batches, ledger, failedBatches, true),
+  };
+}
+
+async function generateJsonWithRetry(generator, request, attempts = 2) {
+  let lastError;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await generator.generateJson(request);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError;
+}
+
+function retrievalDiagnostics(documents, batches, ledger, failedBatches, reductionFallback = false) {
+  return {
+    documents: documents.length,
+    chunks: documents.reduce((total, document) => total + document.evidence.length, 0),
+    batches: batches.length,
+    failedBatches,
+    validatedFindings: ledger.length,
+    reductionFallback,
+  };
+}
+
+export function buildEvidenceLedger(mappedAnswers, limit = 72) {
+  const ledger = [];
+  const seen = new Set();
+  for (const answer of mappedAnswers) {
+    for (const section of answer?.sections || []) {
+      for (const claim of section.items || []) {
+        const key = normalize(claim.text);
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        ledger.push({
+          id: `E${ledger.length + 1}`,
+          finding: claim.text,
+          section: section.title,
+          citations: claim.citations,
+        });
+        if (ledger.length >= limit) return ledger;
+      }
+    }
+  }
+  return ledger;
+}
+
+export function validateSynthesizedAnswer(value, ledger) {
+  const byId = new Map(ledger.map((entry) => [entry.id, entry]));
+  const sections = [];
+  const claims = [];
+
+  for (const section of (Array.isArray(value?.sections) ? value.sections : []).slice(0, 8)) {
+    const title = cleanInline(section?.title, 120);
+    const kind = VALID_SECTION_KINDS.has(section?.kind) ? section.kind : 'other';
+    const items = [];
+    for (const candidate of (Array.isArray(section?.items) ? section.items : []).slice(0, 8)) {
+      if (claims.length >= 36) break;
+      const text = cleanInline(candidate?.text, 1_800);
+      const entries = [...new Set(Array.isArray(candidate?.evidence_ids) ? candidate.evidence_ids : [])]
+        .map((id) => byId.get(id))
+        .filter(Boolean);
+      if (!text || entries.length === 0 || !synthesisSupportedByLedger(text, entries)) continue;
+
+      const citations = uniqueCitations(entries.flatMap((entry) => entry.citations)).slice(0, 8);
+      if (citations.length === 0) continue;
+      const claim = { text, citations };
+      items.push(claim);
+      claims.push(claim);
+    }
+    if (title && items.length > 0) sections.push({ title, kind, items });
+  }
+
+  return {
+    found: value?.found === true && claims.length > 0,
+    sections: value?.found === true ? sections : [],
+    claims: value?.found === true ? claims : [],
+  };
+}
+
+export function batchDocumentsByByteBudget(documents, maxBytes = 52_000) {
+  const batches = [];
+  let current = [];
+  for (const document of documents) {
+    if (current.length > 0 && Buffer.byteLength(JSON.stringify([...current, document]), 'utf8') > maxBytes) {
+      batches.push(current);
+      current = [];
+    }
+    current.push(document);
+  }
+  if (current.length > 0) batches.push(current);
+  return batches;
+}
+
+async function mapWithConcurrency(items, concurrency, mapper) {
+  const results = new Array(items.length);
+  let cursor = 0;
+  async function worker() {
+    while (cursor < items.length) {
+      const index = cursor;
+      cursor += 1;
+      results[index] = await mapper(items[index], index);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, () => worker()));
+  return results;
+}
+
+function mergeMappedAnswers(mapped) {
+  const sections = [];
+  const claims = [];
+  for (const answer of mapped) {
+    for (const section of answer?.sections || []) {
+      if (claims.length >= 36) break;
+      const remaining = 36 - claims.length;
+      const items = section.items.slice(0, remaining);
+      if (items.length === 0) continue;
+      sections.push({ ...section, items });
+      claims.push(...items);
+    }
+  }
+  return { found: claims.length > 0, sections, claims };
+}
+
+function synthesisSupportedByLedger(text, entries) {
+  const support = entries.map((entry) => [
+    entry.finding,
+    ...entry.citations.map((citation) => citation.quote),
+  ].join(' ')).join(' ');
+  const supportNumbers = new Set(numericTokens(support));
+  if (numericTokens(text).some((number) => !supportNumbers.has(number))) return false;
+
+  const textTokens = groundingTokens(text);
+  const supportTokens = new Set(groundingTokens(support));
+  const matched = textTokens.filter((token) => supportTokens.has(token)).length;
+  return matched >= Math.min(3, textTokens.length) && matched / Math.max(textTokens.length, 1) >= 0.3;
+}
+
+function uniqueCitations(citations) {
+  const seen = new Set();
+  return citations.filter((citation) => {
+    const key = `${citation.wikiPage}\u0000${citation.rawSource}\u0000${citation.locator}\u0000${citation.quote}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function mergeHybridAndLexical(pages, hybridMatches, lexicalRanked, limit) {
@@ -152,7 +426,7 @@ function mergeHybridAndLexical(pages, hybridMatches, lexicalRanked, limit) {
   for (const match of hybridMatches) {
     const page = pagesBySlug.get(match.wikiPage);
     if (!page || seen.has(page.wikiPage)) continue;
-    selected.push({ ...page, score: match.score });
+    selected.push({ ...page, score: match.score, retrievalHints: [match.snippet].filter(Boolean) });
     seen.add(page.wikiPage);
     if (selected.length >= limit) return selected;
   }
@@ -404,10 +678,14 @@ function arrayValue(value) {
   return [];
 }
 
-function selectEvidence(evidence, terms, limit = 12, maxLength = 2_000) {
+function selectEvidence(evidence, terms, limit = 12, maxLength = 2_000, retrievalHints = []) {
+  const hintTokens = new Set(retrievalHints.flatMap((hint) => groundingTokens(hint)));
   return evidence.map((item) => {
     const normalized = normalize(item.text);
-    const score = terms.reduce((total, term) => total + (normalized.includes(term) ? 1 : 0), 0);
+    const exactScore = terms.reduce((total, term) => total + (normalized.includes(term) ? 1 : 0), 0);
+    const itemTokens = new Set(groundingTokens(item.text));
+    const semanticHintScore = [...hintTokens].filter((token) => itemTokens.has(token)).length;
+    const score = exactScore * 4 + semanticHintScore;
     return { ...item, score, text: evidenceExcerpt(item.text, terms, maxLength) };
   }).sort((left, right) => right.score - left.score)
     .slice(0, limit)

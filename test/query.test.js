@@ -1,6 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { fitDocumentsToByteBudget, validateGroundedAnswer } from '../src/query.js';
+import {
+  batchDocumentsByByteBudget,
+  buildEvidenceLedger,
+  fitDocumentsToByteBudget,
+  generateComprehensiveAnswer,
+  validateGroundedAnswer,
+  validateSynthesizedAnswer,
+} from '../src/query.js';
 
 const documents = [{
   wikiPage: 'sources/informe-medico.md',
@@ -152,4 +159,135 @@ test('query context stays below the process argument byte budget', () => {
   assert.ok(selected.length > 0);
   assert.ok(selected.length < largeDocuments.length);
   assert.ok(Buffer.byteLength(JSON.stringify(selected), 'utf8') <= 80_000);
+});
+
+test('comprehensive query batches documents below the subprocess byte budget', () => {
+  const largeDocuments = Array.from({ length: 7 }, (_, index) => ({
+    ...documents[0],
+    wikiPage: `sources/page-${index}.md`,
+    content: 'evidencia '.repeat(1_000),
+  }));
+
+  const batches = batchDocumentsByByteBudget(largeDocuments, 25_000);
+
+  assert.ok(batches.length > 1);
+  assert.equal(batches.flat().length, largeDocuments.length);
+  assert.ok(batches.every((batch) => Buffer.byteLength(JSON.stringify(batch), 'utf8') <= 25_000));
+});
+
+test('citation-preserving synthesis expands ledger ids into exact citations', () => {
+  const mapped = [validateGroundedAnswer({
+    found: true,
+    sections: [{
+      title: 'Hallazgos',
+      kind: 'conclusions',
+      items: [{
+        text: 'Se recetó una pomada el 3 de marzo.',
+        citations: [{
+          wiki_page: 'sources/informe-medico.md',
+          raw_source: 'raw/informe-medico.pdf',
+          locator: 'page 2',
+          quote: 'Se recetó una pomada el 3 de marzo.',
+        }],
+      }],
+    }],
+  }, documents)];
+  const ledger = buildEvidenceLedger(mapped);
+  const result = validateSynthesizedAnswer({
+    found: true,
+    sections: [{
+      title: 'Respuesta detallada',
+      kind: 'answer',
+      items: [{
+        text: 'La evidencia indica que la pomada se recetó el 3 de marzo.',
+        evidence_ids: ['E1'],
+      }],
+    }],
+  }, ledger);
+
+  assert.equal(result.found, true);
+  assert.equal(result.claims.length, 1);
+  assert.equal(result.claims[0].citations[0].rawSource, 'raw/informe-medico.pdf');
+});
+
+test('citation-preserving synthesis rejects unsupported quantities and unknown ids', () => {
+  const ledger = [{
+    id: 'E1',
+    finding: 'Se recetó una pomada el 3 de marzo.',
+    section: 'Hallazgos',
+    citations: [{
+      wikiPage: 'sources/informe-medico.md',
+      rawSource: 'raw/informe-medico.pdf',
+      wikiTitle: 'Informe Medico',
+      locator: 'page 2',
+      quote: 'Se recetó una pomada el 3 de marzo.',
+    }],
+  }];
+  const result = validateSynthesizedAnswer({
+    found: true,
+    sections: [{
+      title: 'Respuesta',
+      kind: 'answer',
+      items: [
+        { text: 'La pomada debe usarse 30 días.', evidence_ids: ['E1'] },
+        { text: 'Se recetó una pomada el 3 de marzo.', evidence_ids: ['E404'] },
+      ],
+    }],
+  }, ledger);
+
+  assert.equal(result.found, false);
+  assert.deepEqual(result.claims, []);
+});
+
+test('comprehensive mode maps evidence then synthesizes through ledger ids', async () => {
+  const calls = [];
+  const generator = {
+    available: true,
+    async generateJson(request) {
+      calls.push(request.schemaName);
+      if (request.schemaName === 'grounded_evidence_findings') {
+        return {
+          found: true,
+          sections: [{
+            title: 'Hallazgos',
+            kind: 'conclusions',
+            items: [{
+              text: 'Se recetó una pomada el 3 de marzo.',
+              citations: [{
+                wiki_page: 'sources/informe-medico.md',
+                raw_source: 'raw/informe-medico.pdf',
+                locator: 'page 2',
+                quote: 'Se recetó una pomada el 3 de marzo.',
+              }],
+            }],
+          }],
+        };
+      }
+      return {
+        found: true,
+        sections: [{
+          title: 'Respuesta completa',
+          kind: 'answer',
+          items: [{
+            text: 'La evidencia indica que la pomada se recetó el 3 de marzo.',
+            evidence_ids: ['E1'],
+          }],
+        }],
+      };
+    },
+  };
+
+  const result = await generateComprehensiveAnswer('¿Qué se recetó?', documents, generator);
+
+  assert.deepEqual(calls, ['grounded_evidence_findings', 'citation_preserving_synthesis']);
+  assert.equal(result.found, true);
+  assert.equal(result.claims.length, 1);
+  assert.deepEqual(result.retrieval, {
+    documents: 1,
+    chunks: 1,
+    batches: 1,
+    failedBatches: 0,
+    validatedFindings: 1,
+    reductionFallback: false,
+  });
 });

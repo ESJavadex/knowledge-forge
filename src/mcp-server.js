@@ -21,7 +21,7 @@ import { getWikiContextHybrid, getWikiFacets, getWikiLinks, getWikiStatus, listW
 // stdout belongs exclusively to the MCP stdio transport.
 console.log = (...args) => console.error(...args);
 
-const server = new Server({ name: 'knowledge-forge', version: '0.3.0' }, {
+const server = new Server({ name: 'knowledge-forge', version: '0.4.0' }, {
   capabilities: { resources: {}, tools: {}, prompts: {} },
   instructions: 'Navigate the generated wiki with list/search/read/links. Ingest only files already placed under raw/. Never claim raw provenance that a page does not expose.',
 });
@@ -170,10 +170,12 @@ server.setRequestHandler(GetPromptRequestSchema, async (request) => {
     description: 'Grounded research workflow for Knowledge Forge',
     messages: [{ role: 'user', content: { type: 'text', text: [
       `Research this question using Knowledge Forge: ${question}`,
-      'Start with wiki_context, then use wiki_read/wiki_links only where needed.',
+      'For a broad question, decompose it into 3–5 complementary subquestions and call wiki_context for each; for a narrow question, start with one wiki_context call.',
+      'Use wiki_search to discover additional source pages and wiki_read/wiki_links only where more detail is needed.',
       'Use only claims supported by returned wiki pages and their raw-source provenance.',
-      'Separate consensus, disagreements, uncertainty, and source-attributed recommendations.',
-      'Cite the wiki page slug and raw source for every substantive claim.',
+      'Write a substantial synthesis when the evidence is broad. Separate direct answer, themes, practical implications, consensus, disagreements, and uncertainty.',
+      'Multiple findings may come from the same source. Cite the wiki page slug, raw source, locator, and quote for every substantive paragraph or bullet.',
+      'Never fabricate evidence. You may connect or summarize retrieved claims only when the cited evidence supports that synthesis.',
     ].join('\n') } }],
   };
 });
