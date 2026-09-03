@@ -61,13 +61,17 @@ export async function startServer() {
   app.post('/api/query', async (req, res) => {
     const question = typeof req.body?.question === 'string' ? req.body.question.trim() : '';
     if (!question) return res.status(400).json({ error: 'A non-empty question is required.' });
+    const mode = req.body?.mode === 'focused' ? 'focused' : 'comprehensive';
 
     try {
-      const result = await queryWiki(question);
+      const result = await queryWiki(question, { mode });
       res.json({
         found: result.found,
         answer: result.answerMarkdown,
         analysisSlug: result.analysisSlug,
+        mode: result.mode || mode,
+        claims: result.claims.length,
+        retrieval: result.retrieval || null,
       });
     } catch (error) {
       const status = error.message.includes('OPENROUTER_API_KEY') ? 503 : 500;

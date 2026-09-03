@@ -124,7 +124,7 @@ node src/cli.js ingest --all      # Ingest raw/ recursively; unchanged hashes ar
 node src/cli.js ingest <path> --force # Reprocess even when the source hash is unchanged
 node src/cli.js ingest <path> --provider openclaw --model zai/glm-5.3-flash --require-llm
                                   # Use the exact Z.AI model configured in OpenClaw; fail closed
-node src/cli.js query "<question>" # Answer from wiki knowledge and save the cited analysis
+node src/cli.js query "<question>" # Focused answer from wiki knowledge and save the cited analysis
 node src/cli.js lint              # Health-check: orphans, dangling links, metadata
 node src/cli.js serve             # Start the web UI (port 3000)
 ```
@@ -145,13 +145,13 @@ npm start
 Semantic extraction supports two adapters:
 
 - `--provider openclaw` uses OpenClaw's stored provider authentication through a lean, isolated `infer model run` call. It sends no agent history, tools, memory, or workspace context. The recommended podcast pipeline uses `zai/glm-5.3-flash` through this adapter.
-- `--provider openrouter` uses the existing OpenRouter adapter and remains the default for backwards compatibility.
+- `--provider openrouter` uses the existing OpenRouter adapter when explicitly selected or when `OPENROUTER_API_KEY` is present.
 
 Rich ingestion extracts a grounded summary, categories, key points, concepts, entities, conclusions, source-attributed recommendations, notable verbatim quotes, open questions, and relevant dates. Use `--require-llm` for production jobs where a heuristic fallback would be unacceptable.
 
 For OpenClaw, authenticate and allow the selected model in OpenClaw itself; no provider credential is copied into this repository. For OpenRouter, provide `OPENROUTER_API_KEY` through your environment or secret manager. `OPENROUTER_MODEL` (or `LLM_MODEL`) optionally selects its model.
 
-Without `OPENROUTER_API_KEY`, ingestion automatically uses the original frequency/bigram heuristic, so `init`, `demo`, `ingest`, `lint`, `mcp`, and `serve` keep working offline. Query mode reports that OpenRouter configuration is required.
+Without an LLM provider, ingestion can still use the original frequency/bigram heuristic, so `init`, `demo`, `ingest`, `lint`, `mcp`, and `serve` keep working offline. Query mode defaults to the lean OpenClaw adapter and `zai/glm-5.3-flash` on hosts where OpenClaw is configured.
 
 When OpenRouter is enabled, source excerpts are sent to the selected model provider. Check that provider's privacy terms before ingesting sensitive personal documents.
 
@@ -189,7 +189,20 @@ If OpenRouter is not configured or returns malformed structured output, ingestio
 
 ### 2. Query
 
-Use `node src/cli.js query "..."` or the query field in the web UI. The answer is organized into useful sections such as conclusions, actions, cross-source consensus, disagreements, and caveats. A single source may support several independently cited items; answers are not limited to one conclusion per Markdown file. The model may emit only atomic claims backed by an exact wiki page, raw source, locator, and verbatim evidence quote; unsupported claims and quantities absent from the quote are discarded. Every result is saved under `wiki/analyses/`, linked to its supporting pages, indexed, and logged.
+Use `node src/cli.js query "..."` or the query field in the web UI. The web UI defaults to **Deep** mode and also offers **Fast** mode.
+
+Deep mode uses citation-preserving hierarchical RAG:
+
+1. Retrieve up to 20 source pages with hybrid lexical + semantic search.
+2. Select several relevant evidence chunks from each source, using the semantic result snippet as an additional chunk-ranking hint.
+3. Split the evidence into byte-bounded batches and extract atomic findings from up to three batches concurrently.
+4. Validate every finding against its exact wiki page, raw source, locator, and verbatim quote.
+5. Build an evidence ledger and run a second synthesis pass that may connect and compare only those validated findings.
+6. Expand evidence IDs back into full citations and reject unsupported quantities or unknown evidence references.
+
+The resulting answer can contain several independently cited conclusions from the same Markdown file and is organized into useful sections such as direct answer, conclusions, actions, cross-source consensus, disagreements, and caveats. Every displayed item has one or more citations. If the final synthesis fails validation, Knowledge Forge falls back to the already validated map-stage findings instead of returning an uncited answer. Results are saved under `wiki/analyses/`, linked to their supporting pages, indexed, and logged.
+
+Fast mode performs one bounded generation call over the best retrieved sources. It is useful when latency matters more than exhaustive coverage.
 
 ### Hybrid search
 

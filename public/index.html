@@ -119,6 +119,15 @@
 
     .query-box button:disabled { opacity: 0.55; cursor: wait; }
 
+    .query-box select {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text);
+      padding: 8px 6px;
+      font-size: 12px;
+    }
+
     .filter-tabs {
       display: flex;
       padding: 8px 16px;
@@ -291,6 +300,10 @@
       </div>
       <form class="query-box" id="query-form">
         <input type="text" id="query" placeholder="Ask the wiki..." aria-label="Ask the wiki" />
+        <select id="query-mode" aria-label="Answer depth">
+          <option value="comprehensive" selected>Deep</option>
+          <option value="focused">Fast</option>
+        </select>
         <button type="submit" id="query-button">Ask</button>
       </form>
       <div class="filter-tabs" id="filters">
@@ -425,19 +438,20 @@
       event.preventDefault();
       const input = document.getElementById('query');
       const button = document.getElementById('query-button');
+      const mode = document.getElementById('query-mode').value;
       const question = input.value.trim();
       if (!question || button.disabled) return;
 
       button.disabled = true;
       button.textContent = '...';
       document.getElementById('main').innerHTML = `
-        <div class="welcome"><h2>Consulting the wiki…</h2><p>Only cited wiki knowledge will be used.</p></div>`;
+        <div class="welcome"><h2>Consulting the wiki…</h2><p>${mode === 'comprehensive' ? 'Retrieving and synthesizing multiple evidence batches. This may take a few minutes.' : 'Only cited wiki knowledge will be used.'}</p></div>`;
 
       try {
         const response = await fetch(`${API}/query`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ question }),
+          body: JSON.stringify({ question, mode }),
         });
         const result = await response.json();
         if (!response.ok) throw new Error(result.error || 'The query failed.');
