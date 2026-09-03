@@ -455,8 +455,12 @@
         });
         const result = await response.json();
         if (!response.ok) throw new Error(result.error || 'The query failed.');
-        await loadPages();
+        // Render the answer first. Refreshing the full catalog can be relatively
+        // expensive as the wiki grows and should never delay the visible result.
         await loadPage(result.analysisSlug);
+        loadPages().catch((error) => {
+          console.warn('The answer loaded, but the sidebar refresh failed:', error);
+        });
       } catch (error) {
         document.getElementById('main').innerHTML = `
           <div class="welcome"><h2>Query unavailable</h2><p id="query-error"></p></div>`;
