@@ -5,6 +5,7 @@ import { fileURLToPath } from 'url';
 import matter from 'gray-matter';
 import { listMarkdownFiles, WIKI_DIR } from './utils.js';
 import { queryWiki } from './query.js';
+import { readWikiPage } from './wiki-reader.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3000;
@@ -93,25 +94,26 @@ export async function startServer() {
 
   app.get('/api/pages/:slug(*)', async (req, res) => {
     const slug = decodeURIComponent(req.params.slug);
-    const filePath = path.join(WIKI_DIR, slug);
-    if (!filePath.startsWith(WIKI_DIR) || !fs.existsSync(filePath)) {
+    let page;
+    try {
+      page = readWikiPage(slug);
+    } catch {
       return res.status(404).json({ error: 'Page not found' });
     }
 
-    const content = fs.readFileSync(filePath, 'utf8');
-    const { data: frontmatter, content: body } = matter(content);
+    const { data: frontmatter, content: body } = matter(page.markdown);
 
     const pages = getAllPages();
     let html = await marked(body);
     html = resolveWikiLinks(html, pages);
 
     res.json({
-      slug,
-      title: frontmatter.title || path.basename(slug, '.md'),
+      slug: page.slug,
+      title: frontmatter.title || path.basename(page.slug, '.md'),
       type: frontmatter.type || 'page',
       frontmatter,
       html,
-      raw: content,
+      raw: page.markdown,
     });
   });
 
