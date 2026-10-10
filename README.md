@@ -352,13 +352,17 @@ The built-in UI features:
 
 ## Demo Sources Included
 
-| Source | Concepts | Entities |
-|---|---|---|
-| Transformer Architecture | 10 | 10 |
-| Retrieval-Augmented Generation | 10 | 10 |
-| Knowledge Graphs in AI | 10 | 10 |
+`raw/` ships four short sources: Transformer Architecture, Retrieval-Augmented Generation, Knowledge Graphs in AI, and Karpathy's original LLM Wiki idea.
 
-Run `npm run demo` to generate all of them.
+The committed `wiki/` is a **small hand-written example** (4 source pages, 7 concepts, 5 entities, plus `index.md` and `log.md`) so you can browse the UI and see the target format right after cloning. It was not produced by a model, and `node src/cli.js lint` reports it clean.
+
+To see what the tool really does, regenerate it with a model:
+
+```bash
+OPENROUTER_API_KEY=... node src/cli.js ingest --all --force --require-llm
+```
+
+`npm run demo` also works offline, but without a model provider it falls back to the frequency/bigram heuristic, which produces much noisier concept and entity pages.
 
 ## Roadmap
 
