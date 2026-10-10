@@ -395,7 +395,7 @@ Run `npm run demo` to generate all of them.
 
 ## License
 
-MIT — use it, fork it, build on top of it.
+MIT — see [LICENSE](LICENSE). Use it, fork it, build on top of it.
 
 ---
 
