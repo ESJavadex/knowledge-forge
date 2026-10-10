@@ -158,8 +158,10 @@ npm start
 
 Semantic extraction supports two adapters:
 
-- `--provider openclaw` uses OpenClaw's stored provider authentication through a lean, isolated `infer model run` call. It sends no agent history, tools, memory, or workspace context. The recommended podcast pipeline uses `zai/glm-5.3-flash` through this adapter.
+- `--provider openclaw` uses OpenClaw's stored provider authentication through a lean, isolated `infer model run` call. It sends no agent history, tools, memory, or workspace context. Its default model is `zai/glm-5.3-flash`; pass `--model` to use another one.
 - `--provider openrouter` uses the existing OpenRouter adapter when explicitly selected or when `OPENROUTER_API_KEY` is present.
+
+Markdown sources can carry optional frontmatter that is copied to the source page: `title`, `podcast` (used as a collection name, e.g. a podcast or newsletter), `published`, `source_type`, `source_url`, `show_url`, and `duration_seconds`. The `podcast` and `published` fields also power the MCP filters.
 
 Rich ingestion extracts a grounded summary, categories, key points, concepts, entities, conclusions, source-attributed recommendations, notable verbatim quotes, open questions, and relevant dates. Use `--require-llm` for production jobs where a heuristic fallback would be unacceptable.
 
