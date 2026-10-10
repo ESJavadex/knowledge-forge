@@ -9,7 +9,9 @@ import { readWikiPage } from './wiki-reader.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3000;
-const HOST = process.env.HOST || '0.0.0.0';
+// Loopback by default: the wiki is only reachable from this machine.
+// Set HOST=0.0.0.0 (or a specific interface such as a Tailscale IP) to expose it on purpose.
+const HOST = process.env.HOST || '127.0.0.1';
 
 function getAllPages() {
   const files = listMarkdownFiles(WIKI_DIR);
@@ -133,7 +135,11 @@ export async function startServer() {
   app.listen(PORT, HOST, () => {
     console.log(`\n📚 Knowledge Forge running at http://${HOST}:${PORT}`);
     console.log(`   Local:   http://localhost:${PORT}`);
-    console.log(`   Network: http://${HOST}:${PORT}`);
+    if (HOST === '127.0.0.1' || HOST === 'localhost' || HOST === '::1') {
+      console.log('   Network: disabled (set HOST=0.0.0.0 to expose it on your network)');
+    } else {
+      console.log(`   Network: http://${HOST}:${PORT} (reachable by other devices; the UI has no authentication)`);
+    }
     console.log(`   ${new Date().toLocaleString()}\n`);
   });
 }

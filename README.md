@@ -114,6 +114,20 @@ npm start           # launch web UI at http://localhost:3000
 
 Open `http://localhost:3000` and browse the wiki. The sidebar lets you filter by type, search pages, and navigate through wiki links.
 
+### Security: local by default
+
+The web UI has no authentication, and `POST /api/query` spends your model provider's credits. For that reason the server listens on `127.0.0.1` by default, so only your own machine can reach it.
+
+To expose it on a network, do it on purpose and only on a network you trust (for example, your Tailscale tailnet):
+
+```bash
+HOST=0.0.0.0 npm start          # every interface
+HOST=100.x.y.z npm start        # a single interface, e.g. your Tailscale IP
+PORT=8080 npm start             # change the port (default 3000)
+```
+
+Avoid `HOST=0.0.0.0` on shared Wi-Fi (coworkings, classrooms, events): anyone on the same network could read your wiki.
+
 ## Commands
 
 ```bash
