@@ -2,6 +2,7 @@
   "name": "llm-wiki",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "dev": "node src/cli.js init && node src/cli.js demo && node src/server.js",

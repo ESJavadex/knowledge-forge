@@ -7,37 +7,37 @@ test('semantic extraction normalizes structured output and preserves relevant da
     available: true,
     async generateJson() {
       return {
-        summary: 'El 3 de marzo se recetó pomada para la fisura.',
-        categories: ['Salud'],
-        concepts: ['Fisura anal', 'Tratamiento'],
-        entities: ['Pomada X', 'Pomada X'],
-        key_points: ['La pomada se recetó para la fisura.'],
-        conclusions: ['El tratamiento indicado fue tópico.'],
-        recommendations: ['Usar la pomada prescrita.'],
-        notable_quotes: [{ quote: 'se recetó Pomada X', context: 'Tratamiento' }],
-        open_questions: ['No se especifica la duración.'],
-        relevant_dates: [{ date: '2026-03-03', description: 'Prescripción' }],
+        summary: 'El 3 de marzo se lanzó la campaña de primavera.',
+        categories: ['Marketing'],
+        concepts: ['Campaña de primavera', 'Redes sociales'],
+        entities: ['Campaña X', 'Campaña X'],
+        key_points: ['La campaña se lanzó en redes sociales.'],
+        conclusions: ['La campaña se centró en redes sociales.'],
+        recommendations: ['Medir el resultado de la campaña.'],
+        notable_quotes: [{ quote: 'se lanzó Campaña X', context: 'Lanzamiento' }],
+        open_questions: ['No se especifica el presupuesto.'],
+        relevant_dates: [{ date: '2026-03-03', description: 'Lanzamiento' }],
       };
     },
   };
 
   const result = await extractSemantics({
-    text: 'El 3 de marzo se recetó Pomada X para la fisura anal.',
+    text: 'El 3 de marzo se lanzó Campaña X en redes sociales.',
     fileName: 'informe.md',
     generator,
   });
 
   assert.equal(result.mode, 'llm');
-  assert.deepEqual(result.categories, ['Salud']);
-  assert.deepEqual(result.conclusions, ['El tratamiento indicado fue tópico.']);
-  assert.deepEqual(result.notableQuotes, [{ quote: 'se recetó Pomada X', context: 'Tratamiento' }]);
-  assert.deepEqual(result.entities, [{ name: 'Pomada X', count: 1 }]);
-  assert.deepEqual(result.relevantDates, [{ date: '2026-03-03', description: 'Prescripción' }]);
+  assert.deepEqual(result.categories, ['Marketing']);
+  assert.deepEqual(result.conclusions, ['La campaña se centró en redes sociales.']);
+  assert.deepEqual(result.notableQuotes, [{ quote: 'se lanzó Campaña X', context: 'Lanzamiento' }]);
+  assert.deepEqual(result.entities, [{ name: 'Campaña X', count: 1 }]);
+  assert.deepEqual(result.relevantDates, [{ date: '2026-03-03', description: 'Lanzamiento' }]);
 });
 
 test('extraction keeps the existing heuristic fallback when no key is configured', async () => {
   const result = await extractSemantics({
-    text: '# Note\n\nTreatment treatment treatment and follow up.',
+    text: '# Note\n\nCampaign campaign campaign and follow up.',
     fileName: 'note.md',
     generator: { available: false },
   });

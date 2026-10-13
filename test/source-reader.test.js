@@ -7,11 +7,11 @@ import { execFileSync } from 'child_process';
 import { docxXmlToText, readSourceDocument, readSourceWithEvidence } from '../src/adapters/source-reader.js';
 
 test('DOCX XML is converted to readable paragraphs, tabs, line breaks, and entities', () => {
-  const xml = '<w:document><w:body><w:p><w:r><w:t>Pomada &amp; crema</w:t></w:r></w:p>'
-    + '<w:p><w:r><w:t>3 de marzo</w:t><w:tab/><w:t>2026</w:t><w:br/><w:t>Control</w:t></w:r></w:p>'
+  const xml = '<w:document><w:body><w:p><w:r><w:t>Ventas &amp; marketing</w:t></w:r></w:p>'
+    + '<w:p><w:r><w:t>3 de marzo</w:t><w:tab/><w:t>2026</w:t><w:br/><w:t>Resumen</w:t></w:r></w:p>'
     + '</w:body></w:document>';
 
-  assert.equal(docxXmlToText(xml), 'Pomada & crema\n\n3 de marzo\t2026\nControl');
+  assert.equal(docxXmlToText(xml), 'Ventas & marketing\n\n3 de marzo\t2026\nResumen');
 });
 
 test('source reader extracts text from real PDF and DOCX containers without modifying them', (context) => {
@@ -20,18 +20,18 @@ test('source reader extracts text from real PDF and DOCX containers without modi
 
   const pdfPath = path.join(fixtureRoot, 'informe.pdf');
   const docxPath = path.join(fixtureRoot, 'informe.docx');
-  fs.writeFileSync(pdfPath, createMinimalPdf('Pomada X on 2026-03-03'));
+  fs.writeFileSync(pdfPath, createMinimalPdf('Campaign X on 2026-03-03'));
 
   const wordDir = path.join(fixtureRoot, 'word');
   fs.mkdirSync(wordDir);
   fs.writeFileSync(path.join(wordDir, 'document.xml'),
-    '<w:document><w:body><w:p><w:r><w:t>Pomada X el 3 de marzo de 2026</w:t></w:r></w:p></w:body></w:document>');
+    '<w:document><w:body><w:p><w:r><w:t>Campaña X el 3 de marzo de 2026</w:t></w:r></w:p></w:body></w:document>');
   execFileSync('zip', ['-q', docxPath, 'word/document.xml'], { cwd: fixtureRoot });
 
   const pdfBefore = fs.readFileSync(pdfPath);
   const docxBefore = fs.readFileSync(docxPath);
-  assert.match(readSourceDocument(pdfPath), /Pomada X on 2026-03-03/);
-  assert.match(readSourceDocument(docxPath), /Pomada X el 3 de marzo de 2026/);
+  assert.match(readSourceDocument(pdfPath), /Campaign X on 2026-03-03/);
+  assert.match(readSourceDocument(docxPath), /Campaña X el 3 de marzo de 2026/);
   assert.deepEqual(fs.readFileSync(pdfPath), pdfBefore);
   assert.deepEqual(fs.readFileSync(docxPath), docxBefore);
 });
@@ -46,13 +46,13 @@ test('a scanned PDF falls back to page OCR with precise page locators', () => {
         fs.writeFileSync(`${args.at(-1)}-1.png`, 'fake image');
         return '';
       }
-      if (command === 'tesseract') return 'Pomada X para la fisura, 3 de marzo de 2026';
+      if (command === 'tesseract') return 'Ticket 0042: 2 cafés y 1 tostada, 3 de marzo de 2026';
       throw new Error(`Unexpected command: ${command}`);
     },
   });
 
   assert.equal(document.extraction, 'ocr');
-  assert.deepEqual(document.segments, [{ locator: 'page 1', text: 'Pomada X para la fisura, 3 de marzo de 2026' }]);
+  assert.deepEqual(document.segments, [{ locator: 'page 1', text: 'Ticket 0042: 2 cafés y 1 tostada, 3 de marzo de 2026' }]);
   assert.deepEqual(calls, ['pdftotext', 'pdftoppm', 'tesseract']);
 });
 

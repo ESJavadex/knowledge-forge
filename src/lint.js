@@ -101,7 +101,7 @@ export function lintWiki() {
       }
     }
 
-    console.log(`\n总计: ${issues.length} issues`);
+    console.log(`\nTotal: ${issues.length} issues`);
   }
 
   return issues;

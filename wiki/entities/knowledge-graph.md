@@ -1,17 +1,19 @@
 ---
 type: entity
 title: "Knowledge Graph"
-created: "2026-04-09T18:44:20.169Z"
+created: "2026-10-10T10:00:00.000Z"
 mention_count: 8
 sources: ["Knowledge Graphs Ai"]
 ---
 
 # Knowledge Graph
 
+Graph of entities (nodes) and typed relations (edges). [[Wikidata]] is a public example.
+
 ## Knowledge Graphs Ai
 
 > Mentioned 8x
 >
-> Knowledge Graphs in AI
+> Used in AI since the early days of symbolic systems.
 
 [[Knowledge Graphs Ai]]

@@ -10,7 +10,7 @@ import { fileURLToPath } from 'url';
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 for (const extension of ['md', 'pdf', 'docx']) {
-  test(`medical ${extension.toUpperCase()} can be ingested and queried with exact wiki/raw citations`, async (context) => {
+  test(`marketing report ${extension.toUpperCase()} can be ingested and queried with exact wiki/raw citations`, async (context) => {
   const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'knowledge-forge-'));
   context.after(() => fs.rmSync(fixtureRoot, { recursive: true, force: true }));
 
@@ -21,13 +21,13 @@ for (const extension of ['md', 'pdf', 'docx']) {
   fs.mkdirSync(path.join(fixtureRoot, 'raw'), { recursive: true });
   fs.mkdirSync(path.join(fixtureRoot, 'wiki'), { recursive: true });
 
-  const sourcePath = path.join(fixtureRoot, 'raw', `informe-medico.${extension}`);
-  writeMedicalSource(sourcePath, extension, fixtureRoot);
+  const sourcePath = path.join(fixtureRoot, 'raw', `informe-campana.${extension}`);
+  writeMarketingSource(sourcePath, extension, fixtureRoot);
   const sourceBefore = fs.readFileSync(sourcePath);
   const evidence = {
-    md: { locator: 'section: Informe médico', quote: 'El 3 de marzo de 2026 se recetó Pomada X para una fisura anal.' },
-    pdf: { locator: 'page 1', quote: 'Pomada X para fisura anal el 3 de marzo de 2026' },
-    docx: { locator: 'paragraph 1', quote: 'El 3 de marzo de 2026 se recetó Pomada X para una fisura anal.' },
+    md: { locator: 'section: Informe campaña', quote: 'El 3 de marzo de 2026 se lanzó Campaña X en redes sociales.' },
+    pdf: { locator: 'page 1', quote: 'Campana X se lanzo el 3 de marzo de 2026' },
+    docx: { locator: 'paragraph 1', quote: 'El 3 de marzo de 2026 se lanzó Campaña X en redes sociales.' },
   }[extension];
 
   const server = http.createServer(async (request, response) => {
@@ -37,24 +37,24 @@ for (const extension of ['md', 'pdf', 'docx']) {
     const schemaName = payload.response_format?.json_schema?.name;
     const result = schemaName === 'knowledge_extraction'
       ? {
-          summary: 'El 3 de marzo de 2026 se recetó Pomada X para una fisura anal.',
-          categories: ['Salud'],
-          concepts: ['Fisura anal', 'Tratamiento'],
-          entities: ['Pomada X'],
-          key_points: ['Pomada X fue el tratamiento indicado.'],
-          conclusions: ['La indicación registrada fue un tratamiento tópico.'],
-          recommendations: ['Seguir la prescripción registrada.'],
-          notable_quotes: [{ quote: 'se recetó Pomada X', context: 'Indicación terapéutica' }],
-          open_questions: ['No consta la duración del tratamiento.'],
-          relevant_dates: [{ date: '2026-03-03', description: 'Prescripción de Pomada X' }],
+          summary: 'El 3 de marzo de 2026 se lanzó Campaña X en redes sociales.',
+          categories: ['Marketing'],
+          concepts: ['Campaña de primavera', 'Redes sociales'],
+          entities: ['Campaña X'],
+          key_points: ['Campaña X fue la campaña lanzada.'],
+          conclusions: ['La campaña se centró en redes sociales.'],
+          recommendations: ['Medir el resultado de la campaña.'],
+          notable_quotes: [{ quote: 'se lanzó Campaña X', context: 'Lanzamiento' }],
+          open_questions: ['No consta el presupuesto de la campaña.'],
+          relevant_dates: [{ date: '2026-03-03', description: 'Lanzamiento de Campaña X' }],
         }
       : {
           found: true,
           claims: [{
-            text: 'Se recetó Pomada X para la fisura anal el 3 de marzo de 2026.',
+            text: 'Campaña X se lanzó el 3 de marzo de 2026.',
             citations: [{
-              wiki_page: 'sources/informe-medico.md',
-              raw_source: `raw/informe-medico.${extension}`,
+              wiki_page: 'sources/informe-campana.md',
+              raw_source: `raw/informe-campana.${extension}`,
               locator: evidence.locator,
               quote: evidence.quote,
             }],
@@ -80,46 +80,46 @@ for (const extension of ['md', 'pdf', 'docx']) {
   await runCli(['ingest', sourcePath, '--force'], fixtureRoot, env);
   const repeatedIngest = await runCli(['ingest', path.join(fixtureRoot, 'raw')], fixtureRoot, env);
   assert.match(repeatedIngest, /skipped 1 unchanged source/);
-  const queryOutput = await runCli(['query', '¿qué me recetaron para la fisura y en qué fecha?'], fixtureRoot, env);
+  const queryOutput = await runCli(['query', '¿qué campaña se lanzó y en qué fecha?'], fixtureRoot, env);
 
-  assert.match(queryOutput, /Pomada X/);
-  assert.match(queryOutput, /wiki\/sources\/informe-medico\.md/);
-  assert.match(queryOutput, new RegExp(`raw/informe-medico\\.${extension}`));
+  assert.match(queryOutput, /Campaña X/);
+  assert.match(queryOutput, /wiki\/sources\/informe-campana\.md/);
+  assert.match(queryOutput, new RegExp(`raw/informe-campana\\.${extension}`));
   assert.deepEqual(fs.readFileSync(sourcePath), sourceBefore);
 
-  const sourcePage = fs.readFileSync(path.join(fixtureRoot, 'wiki', 'sources', 'informe-medico.md'), 'utf8');
-  assert.match(sourcePage, /## Categories[\s\S]*\[\[Salud\]\]/);
-  assert.match(sourcePage, /## Key Points[\s\S]*Pomada X fue el tratamiento indicado/);
-  assert.match(sourcePage, /## Conclusions[\s\S]*tratamiento tópico/);
+  const sourcePage = fs.readFileSync(path.join(fixtureRoot, 'wiki', 'sources', 'informe-campana.md'), 'utf8');
+  assert.match(sourcePage, /## Categories[\s\S]*\[\[Marketing\]\]/);
+  assert.match(sourcePage, /## Key Points[\s\S]*Campaña X fue la campaña lanzada/);
+  assert.match(sourcePage, /## Conclusions[\s\S]*redes sociales/);
   assert.match(sourcePage, /## Recommendations From the Source/);
-  assert.match(sourcePage, /## Notable Quotes[\s\S]*se recetó Pomada X/);
+  assert.match(sourcePage, /## Notable Quotes[\s\S]*se lanzó Campaña X/);
   assert.match(sourcePage, /model: "anthropic\/test-model"/);
 
   const analyses = fs.readdirSync(path.join(fixtureRoot, 'wiki', 'analyses'));
   assert.equal(analyses.length, 1);
   const analysis = fs.readFileSync(path.join(fixtureRoot, 'wiki', 'analyses', analyses[0]), 'utf8');
-  assert.match(analysis, new RegExp(`\\[\\[Informe ${extension === 'md' ? 'médico' : 'Medico'}\\]\\]`));
-  assert.match(analysis, new RegExp(`raw/informe-medico\\.${extension}`));
+  assert.match(analysis, new RegExp(`\\[\\[Informe ${extension === 'md' ? 'campaña' : 'Campana'}\\]\\]`));
+  assert.match(analysis, new RegExp(`raw/informe-campana\\.${extension}`));
   assert.match(analysis, new RegExp(evidence.locator.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
-  assert.match(analysis, /Pomada X/);
+  assert.match(analysis, /Campaña X/);
 
   const manifest = JSON.parse(fs.readFileSync(path.join(fixtureRoot, 'wiki', '.ingest-manifest.json'), 'utf8'));
   assert.equal(Object.keys(manifest.sources).length, 1);
   assert.equal(Object.values(manifest.sources)[0].extractionSchemaVersion, 4);
   const timeline = fs.readFileSync(path.join(fixtureRoot, 'wiki', 'timeline.md'), 'utf8');
   assert.match(timeline, /2026-03-03/);
-  assert.match(timeline, new RegExp(`\\[\\[Informe ${extension === 'md' ? 'médico' : 'Medico'}\\]\\]`));
+  assert.match(timeline, new RegExp(`\\[\\[Informe ${extension === 'md' ? 'campaña' : 'Campana'}\\]\\]`));
   });
 }
 
-function writeMedicalSource(sourcePath, extension, fixtureRoot) {
-  const text = 'El 3 de marzo de 2026 se recetó Pomada X para una fisura anal.';
+function writeMarketingSource(sourcePath, extension, fixtureRoot) {
+  const text = 'El 3 de marzo de 2026 se lanzó Campaña X en redes sociales.';
   if (extension === 'md') {
-    fs.writeFileSync(sourcePath, `# Informe médico\n\n${text}\n`);
+    fs.writeFileSync(sourcePath, `# Informe campaña\n\n${text}\n`);
     return;
   }
   if (extension === 'pdf') {
-    fs.writeFileSync(sourcePath, createMinimalPdf('Pomada X para fisura anal el 3 de marzo de 2026'));
+    fs.writeFileSync(sourcePath, createMinimalPdf('Campana X se lanzo el 3 de marzo de 2026'));
     return;
   }
 

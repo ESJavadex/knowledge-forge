@@ -1,17 +1,6 @@
 # Wiki Log
 
+## [2026-10-10] example | Hand-written example wiki
 
-## [2026-04-09] ingest | Transformer Architecture
-
-- Detail: transformer-architecture.md
-- Timestamp: 2026-04-09T18:44:15.175Z
-
-## [2026-04-09] ingest | Retrieval Augmented Generation
-
-- Detail: retrieval-augmented-generation.md
-- Timestamp: 2026-04-09T18:44:17.645Z
-
-## [2026-04-09] ingest | Knowledge Graphs Ai
-
-- Detail: knowledge-graphs-ai.md
-- Timestamp: 2026-04-09T18:44:20.171Z
+- Detail: replaced the old heuristic-extractor output with a small hand-written example (4 sources, 7 concepts, 5 entities) built from the files in raw/.
+- Timestamp: 2026-10-10T10:00:00.000Z

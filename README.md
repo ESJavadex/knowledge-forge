@@ -114,6 +114,20 @@ npm start           # launch web UI at http://localhost:3000
 
 Open `http://localhost:3000` and browse the wiki. The sidebar lets you filter by type, search pages, and navigate through wiki links.
 
+### Security: local by default
+
+The web UI has no authentication, and `POST /api/query` spends your model provider's credits. For that reason the server listens on `127.0.0.1` by default, so only your own machine can reach it.
+
+To expose it on a network, do it on purpose and only on a network you trust (for example, your Tailscale tailnet):
+
+```bash
+HOST=0.0.0.0 npm start          # every interface
+HOST=100.x.y.z npm start        # a single interface, e.g. your Tailscale IP
+PORT=8080 npm start             # change the port (default 3000)
+```
+
+Avoid `HOST=0.0.0.0` on shared Wi-Fi (coworkings, classrooms, events): anyone on the same network could read your wiki.
+
 ## Commands
 
 ```bash
@@ -144,8 +158,10 @@ npm start
 
 Semantic extraction supports two adapters:
 
-- `--provider openclaw` uses OpenClaw's stored provider authentication through a lean, isolated `infer model run` call. It sends no agent history, tools, memory, or workspace context. The recommended podcast pipeline uses `zai/glm-5.3-flash` through this adapter.
+- `--provider openclaw` uses OpenClaw's stored provider authentication through a lean, isolated `infer model run` call. It sends no agent history, tools, memory, or workspace context. Its default model is `zai/glm-5.3-flash`; pass `--model` to use another one.
 - `--provider openrouter` uses the existing OpenRouter adapter when explicitly selected or when `OPENROUTER_API_KEY` is present.
+
+Markdown sources can carry optional frontmatter that is copied to the source page: `title`, `podcast` (used as a collection name, e.g. a podcast or newsletter), `published`, `source_type`, `source_url`, `show_url`, and `duration_seconds`. The `podcast` and `published` fields also power the MCP filters.
 
 Rich ingestion extracts a grounded summary, categories, key points, concepts, entities, conclusions, source-attributed recommendations, notable verbatim quotes, open questions, and relevant dates. Use `--require-llm` for production jobs where a heuristic fallback would be unacceptable.
 
@@ -338,13 +354,17 @@ The built-in UI features:
 
 ## Demo Sources Included
 
-| Source | Concepts | Entities |
-|---|---|---|
-| Transformer Architecture | 10 | 10 |
-| Retrieval-Augmented Generation | 10 | 10 |
-| Knowledge Graphs in AI | 10 | 10 |
+`raw/` ships four short sources: Transformer Architecture, Retrieval-Augmented Generation, Knowledge Graphs in AI, and Karpathy's original LLM Wiki idea.
 
-Run `npm run demo` to generate all of them.
+The committed `wiki/` is a **small hand-written example** (4 source pages, 7 concepts, 5 entities, plus `index.md` and `log.md`) so you can browse the UI and see the target format right after cloning. It was not produced by a model, and `node src/cli.js lint` reports it clean.
+
+To see what the tool really does, regenerate it with a model:
+
+```bash
+OPENROUTER_API_KEY=... node src/cli.js ingest --all --force --require-llm
+```
+
+`npm run demo` also works offline, but without a model provider it falls back to the frequency/bigram heuristic, which produces much noisier concept and entity pages.
 
 ## Roadmap
 
@@ -381,7 +401,7 @@ Run `npm run demo` to generate all of them.
 
 ## License
 
-MIT — use it, fork it, build on top of it.
+MIT — see [LICENSE](LICENSE). Use it, fork it, build on top of it.
 
 ---
 
