@@ -201,7 +201,9 @@ function filterProperties(extra = {}) {
 function textResult(value) {
   return {
     content: [{ type: 'text', text: JSON.stringify(value, null, 2) }],
-    ...(value && typeof value === 'object' ? { structuredContent: value } : {}),
+    // MCP requires structuredContent to be an object: wrap list results.
+    ...(Array.isArray(value) ? { structuredContent: { results: value } }
+      : value && typeof value === 'object' ? { structuredContent: value } : {}),
   };
 }
 
